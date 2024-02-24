@@ -74,6 +74,20 @@ static void mt7620_ephy_init(struct mt7620_gsw *gsw)
 
 		pr_info("gsw: internal ephy disabled\n");
 
+		/* set MDIO clock to 4.167 MHz, disable PHY auto-polling */
+		mtk_switch_w32(gsw, 0x43000504, ESW_PHY_POLLING);
+
+		mtk_switch_w32(gsw, 0x0800000c, 0x701c); // enlarge FE2SW_IPG
+
+		mtk_switch_w32(gsw, 0x00e00000, 0x2704);	// P7 has matrix mode (P7|P6|P5)
+		mtk_switch_w32(gsw, 0x00e00000, 0x2604);	// P6 has matrix mode (P7|P6|P5)
+		mtk_switch_w32(gsw, 0x00600000, 0x2504);	// P5 has matrix mode (P6|P5)
+		mtk_switch_w32(gsw, 0x810080c0, 0x2710);	// P7 is transparent port, disable PVID insert, admit all frames
+		mtk_switch_w32(gsw, 0x810080c0, 0x2610);	// P6 is transparent port, disable PVID insert, admit all frames
+		mtk_switch_w32(gsw, 0x810080c0, 0x2510);	// P5 is transparent port, disable PVID insert, admit all frames
+		mtk_switch_w32(gsw, 0x000fff10, 0x260c);	// disable P6 mac learning
+		mtk_switch_w32(gsw, 0x000fff10, 0x250c);	// disable P5 mac learning
+
 		return;
 	} else if (gsw->ephy_base) {
 		mtk_switch_w32(gsw, mtk_switch_r32(gsw, GSW_REG_GPC1) |

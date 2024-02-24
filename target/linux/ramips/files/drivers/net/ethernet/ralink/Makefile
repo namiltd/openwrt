@@ -8,6 +8,8 @@ ralink-eth-$(CONFIG_NET_RALINK_MDIO)		+= mdio.o
 ralink-eth-$(CONFIG_NET_RALINK_MDIO_RT2880)	+= mdio_rt2880.o
 ralink-eth-$(CONFIG_NET_RALINK_MDIO_MT7620)	+= mdio_mt7620.o
 
+ralink-eth-$(CONFIG_NET_RALINK_OFFLOAD)	+= mtk_offload.o mtk_debugfs.o
+
 ralink-eth-$(CONFIG_NET_RALINK_RT2880)	+= soc_rt2880.o
 ralink-eth-$(CONFIG_NET_RALINK_RT3050)	+= soc_rt3050.o
 ralink-eth-$(CONFIG_NET_RALINK_RT3883)	+= soc_rt3883.o
