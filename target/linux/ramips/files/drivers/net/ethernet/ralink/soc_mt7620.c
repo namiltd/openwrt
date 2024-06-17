@@ -88,7 +88,7 @@ static int mt7620_gsw_config(struct fe_priv *priv)
 		mt7530_probe(priv->dev, NULL, priv->mii_bus, 1);
 
 		/* magic values from original SDK */
-		val = mt7530_mdio_r32(gsw, 0x7830);
+/*		val = mt7530_mdio_r32(gsw, 0x7830);
 		val &= ~BIT(0);
 		val |= BIT(1);
 		mt7530_mdio_w32(gsw, 0x7830, val);
@@ -98,7 +98,7 @@ static int mt7620_gsw_config(struct fe_priv *priv)
 		mt7530_mdio_w32(gsw, 0x7a40, val);
 
 		mt7530_mdio_w32(gsw, 0x7a78, 0x855);
-
+*/
 		pr_info("mt7530: mdio central align\n");
 	} else {
 		mt7530_probe(priv->dev, gsw->base, NULL, 1);
@@ -288,7 +288,7 @@ static void mt7620_port_init(struct fe_priv *priv, struct device_node *np)
 
 static void mt7620_fe_reset(struct fe_priv *priv)
 {
-	fe_reset(MT7620A_RESET_FE | MT7620A_RESET_ESW);
+	fe_reset(MT7620A_RESET_FE | MT7620A_RESET_ESW | MT7620A_RESET_PPE);
 }
 
 static void mt7620_rxcsum_config(bool enable)
@@ -329,6 +329,8 @@ static int mt7620_fwd_config(struct fe_priv *priv)
 
 static void mt7620_tx_dma(struct fe_tx_dma *txd)
 {
+	/* force forward to P5. Need modify for switch */
+	txd->txd4 = 0x20 << 20;
 }
 
 static void mt7620_init_data(struct fe_soc_data *data,
