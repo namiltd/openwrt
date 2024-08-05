@@ -1324,6 +1324,7 @@ static int rtl8367b_detect(struct rtl8366_smi *smi)
 	const char *chip_name = NULL;
 	u32 chip_num;
 	u32 chip_ver;
+	u32 debug0;
 	int ret;
 
 	smi->rtl8367b_chip = RTL8367B_CHIP_UNKNOWN;
@@ -1342,6 +1343,13 @@ static int rtl8367b_detect(struct rtl8366_smi *smi)
 	if (ret) {
 		dev_err(smi->parent, "unable to read %s register\n",
 			"chip version");
+		return ret;
+	}
+
+	ret = rtl8366_smi_read_reg(smi, 0x1303, &debug0);
+	if (ret) {
+		dev_err(smi->parent, "unable to read %s register\n",
+			"debug0");
 		return ret;
 	}
 
@@ -1369,12 +1377,12 @@ static int rtl8367b_detect(struct rtl8366_smi *smi)
 
 	if (!chip_name) {
 		dev_err(smi->parent,
-			"unknown chip (num:%04x ver:%04x)\n",
-			chip_num, chip_ver);
+			"unknown chip (num:%04x ver:%04x, debug0:%04x)\n",
+			chip_num, chip_ver, debug0);
 		return -ENODEV;
 	}
 
-	dev_info(smi->parent, "RTL%s chip found (num:%04x ver:%04x)\n", chip_name, chip_num, chip_ver);
+	dev_info(smi->parent, "RTL%s chip found (num:%04x ver:%04x, debug0:%04x)\n", chip_name, chip_num, chip_ver, debug0);
 
 	return 0;
 }
