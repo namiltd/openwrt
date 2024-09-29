@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+
+#include "mt7620a_tplink_archer.dtsi"
+
+/ {
+	compatible = "mercusys,ac12g-v1-8m", "ralink,mt7620a-soc";
+	model = "Mercusys AC12G v1 (8M)";
+
+	aliases {
+		led-boot = &led_power;
+		led-failsafe = &led_power;
+		led-running = &led_power;
+		led-upgrade = &led_power;
+		label-mac-device = &ethernet;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led_power: power {
+			label = "green:power";
+			gpios = <&gpio2 2 GPIO_ACTIVE_LOW>;
+		};
+
+		wan {
+			label = "green:wan";
+			gpios = <&gpio0 7 GPIO_ACTIVE_LOW>;
+		};
+
+		lan {
+			label = "green:lan";
+			gpios = <&gpio2 3 GPIO_ACTIVE_LOW>;
+		};
+
+		wlan {
+			label = "green:wlan";
+			gpios = <&gpio3 0 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "phy1tpt";
+		};
+	};
+
+	/delete-node/ keys;
+
+	keys {
+		compatible = "gpio-keys";
+
+		reset {
+			label = "reset";
+			gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+		};
+	};
+
+	rtl8367s {
+		compatible = "realtek,rtl8367b";
+		realtek,extif = <7 1 0 1 1 1 1 1 1 2>;
+		mii-bus = <&mdio0>;
+		phy-id = <29>;
+	};
+};
+
+&spi0 {
+	flash@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+	};
+};
+
+&state_default {
+	gpio {
+		groups = "i2c", "uartf", "ephy", "rgmii2";
+		function = "gpio";
+	};
+};
+
+&ethernet {
+	pinctrl-names = "default";
+	pinctrl-0 = <&rgmii1_pins &mdio_pins>;
+
+	nvmem-cells = <&macaddr_rom_f100>;
+	nvmem-cell-names = "mac-address";
+
+	port@5 {
+		status = "okay";
+		mediatek,fixed-link = <1000 1 1 1>;
+		phy-mode = "rgmii";
+	};
+
+	mdio0: mdio-bus {
+		status = "okay";
+		reset-gpios = <&gpio2 20 GPIO_ACTIVE_LOW>;
+		reset-delay-us = <10000>;
+	};
+};
+
+&ehci {
+	status = "disabled";
+};
+
+&ohci {
+	status = "disabled";
+};
+
+&wmac {
+	pinctrl-names = "default", "pa_gpio";
+	pinctrl-0 = <&pa_pins>;
+	pinctrl-1 = <&pa_gpio_pins>;
+
+	nvmem-cells = <&macaddr_rom_f100>;
+	nvmem-cell-names = "mac-address";
+};
+
+&wifi {
+	nvmem-cells = <&macaddr_rom_f100>;
+	nvmem-cell-names = "mac-address";
+};
