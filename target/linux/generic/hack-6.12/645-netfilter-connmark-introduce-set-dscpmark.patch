@@ -209,6 +209,6 @@ Signed-off-by: Kevin Darbyshire-Bryant <ldir@darbyshire-bryant.me.uk>
 +		.targetsize     = sizeof(struct xt_connmark_tginfo3),
 +		.destroy        = connmark_tg_destroy,
 +		.me             = THIS_MODULE,
- 	}
- };
- 
+ 	},
+ #if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
+ 	{
