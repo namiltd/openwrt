@@ -206,7 +206,7 @@ Signed-off-by: Daniel Golle <daniel@makrotopia.org>
  }
  EXPORT_SYMBOL(mtk_pcs_lynxi_create);
  
-@@ -368,5 +368,142 @@
+@@ -303,5 +368,142 @@ void mtk_pcs_lynxi_destroy(struct phylin
  }
  EXPORT_SYMBOL(mtk_pcs_lynxi_destroy);
  

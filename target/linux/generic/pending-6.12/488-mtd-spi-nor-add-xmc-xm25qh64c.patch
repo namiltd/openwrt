@@ -11,7 +11,7 @@ Signed-off-by: Joe Mullally <jwmullally@gmail.com>
 
 --- a/drivers/mtd/spi-nor/xmc.c
 +++ b/drivers/mtd/spi-nor/xmc.c
-@@ -15,6 +15,11 @@
+@@ -15,6 +15,11 @@ static const struct flash_info xmc_nor_p
  		.size = SZ_8M,
  		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
  	}, {

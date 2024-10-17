@@ -80,7 +80,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 +#include <string.h>
 +
  /**
-  * fls - find last (most-significant) bit set
+  * generic_fls - find last (most-significant) bit set
   * @x: the word to search
 @@ -10,6 +12,7 @@
   * Note fls(0) = 0, fls(1) = 1, fls(0x80000000) = 32.
@@ -88,7 +88,6 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  
 +#define fls __linux_fls
  static __always_inline int generic_fls(unsigned int x)
- static __always_inline int fls(unsigned int x)
  {
  	int r = 32;
 --- a/tools/lib/string.c
@@ -216,7 +215,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 --- a/tools/objtool/orc_dump.c
 +++ b/tools/objtool/orc_dump.c
 @@ -4,11 +4,11 @@
- */
+  */
  
  #include <unistd.h>
 -#include <asm/orc_types.h>
@@ -244,12 +243,11 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  
  struct orc_list_entry {
  	struct list_head list;
-
 --- a/tools/arch/x86/lib/insn.c
 +++ b/tools/arch/x86/lib/insn.c
 @@ -15,7 +15,11 @@
  #include "../include/asm/insn.h" /* __ignore_sync_check__ */
- #include "../include/asm-generic/unaligned.h" /* __ignore_sync_check__ */
+ #include "../include/linux/unaligned.h" /* __ignore_sync_check__ */
  
 +#ifdef __KERNEL__
  #include <linux/errno.h>

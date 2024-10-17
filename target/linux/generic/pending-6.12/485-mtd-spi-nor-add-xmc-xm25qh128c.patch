@@ -13,7 +13,7 @@ Datasheet available at https://www.xmcwh.com/uploads/435/XM25QH128C.pdf
 
 --- a/drivers/mtd/spi-nor/xmc.c
 +++ b/drivers/mtd/spi-nor/xmc.c
-@@ -19,6 +19,11 @@
+@@ -19,6 +19,11 @@ static const struct flash_info xmc_nor_p
  		.name = "XM25QH128A",
  		.size = SZ_16M,
  		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,

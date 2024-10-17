@@ -59,7 +59,7 @@ Signed-off-by: David Bauer <mail@david-bauer.net>
 +};
 --- a/drivers/mtd/spi-nor/core.c
 +++ b/drivers/mtd/spi-nor/core.c
-@@ -2001,6 +2001,7 @@ int spi_nor_sr2_bit7_quad_enable(struct
+@@ -1966,6 +1966,7 @@ int spi_nor_sr2_bit7_quad_enable(struct
  
  static const struct spi_nor_manufacturer *manufacturers[] = {
  	&spi_nor_atmel,
@@ -69,7 +69,7 @@ Signed-off-by: David Bauer <mail@david-bauer.net>
  	&spi_nor_everspin,
 --- a/drivers/mtd/spi-nor/core.h
 +++ b/drivers/mtd/spi-nor/core.h
-@@ -631,6 +631,7 @@ struct sfdp {
+@@ -580,6 +580,7 @@ struct sfdp {
  
  /* Manufacturer drivers. */
  extern const struct spi_nor_manufacturer spi_nor_atmel;

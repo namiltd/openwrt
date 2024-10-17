@@ -13,7 +13,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 
 --- a/init/Kconfig
 +++ b/init/Kconfig
-@@ -1451,6 +1451,17 @@ config SYSCTL_ARCH_UNALIGN_ALLOW
+@@ -1512,6 +1512,17 @@ config SYSCTL_ARCH_UNALIGN_ALLOW
  	  the unaligned access emulation.
  	  see arch/parisc/kernel/unaligned.c for reference
  
@@ -63,9 +63,9 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  static int all_symbols;
 +static int uncompressed;
  static int absolute_percpu;
- static int base_relative;
- static int lto_clang;
-@@ -453,12 +454,14 @@ static void write_src(void)
+ 
+ static int token_profit[0x10000];
+@@ -412,12 +413,14 @@ static void write_src(void)
  		for (k = 0; k < table[i]->len; k++)
  			printf(", 0x%02x", table[i]->sym[k]);
  
@@ -83,10 +83,10 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 +			expand_symbol(table[i]->sym, table[i]->len, buf);
 +			strcpy((char *)table[i]->sym, buf);
 +		}
-		printf("\t/* %s */\n", table[i]->sym);
+ 		printf("\t/* %s */\n", table[i]->sym);
  	}
  	printf("\n");
-@@ -469,20 +472,22 @@ static void write_src(void)
+@@ -429,20 +432,22 @@ static void write_src(void)
  
  	free(markers);
  
@@ -97,8 +97,6 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 -		expand_symbol(best_table[i], best_table_len[i], buf);
 -		printf("\t.asciz\t\"%s\"\n", buf);
 -		off += strlen(buf) + 1;
--	}
--	printf("\n");
 +	if (!uncompressed) {
 +		output_label("kallsyms_token_table");
 +		off = 0;
@@ -109,20 +107,22 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 +			off += strlen(buf) + 1;
 +		}
 +		printf("\n");
- 
--	output_label("kallsyms_token_index");
--	for (i = 0; i < 256; i++)
--		printf("\t.short\t%d\n", best_idx[i]);
--	printf("\n");
++
 +		output_label("kallsyms_token_index");
 +		for (i = 0; i < 256; i++)
 +			printf("\t.short\t%d\n", best_idx[i]);
 +		printf("\n");
-+	}
+ 	}
+-	printf("\n");
+-
+-	output_label("kallsyms_token_index");
+-	for (i = 0; i < 256; i++)
+-		printf("\t.short\t%d\n", best_idx[i]);
+-	printf("\n");
  
- 	if (!base_relative)
- 		output_label("kallsyms_addresses");
-@@ -582,6 +587,9 @@ static unsigned char *find_token(unsigne
+ 	output_label("kallsyms_offsets");
+ 
+@@ -532,6 +537,9 @@ static unsigned char *find_token(unsigne
  {
  	int i;
  
@@ -132,7 +132,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  	for (i = 0; i < len - 1; i++) {
  		if (str[i] == token[0] && str[i+1] == token[1])
  			return &str[i];
-@@ -654,6 +662,9 @@ static void optimize_result(void)
+@@ -604,6 +612,9 @@ static void optimize_result(void)
  {
  	int i, best;
  
@@ -142,7 +142,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  	/* using the '\0' symbol last allows compress_symbols to use standard
  	 * fast string functions */
  	for (i = 255; i >= 0; i--) {
-@@ -815,6 +826,7 @@ int main(int argc, char **argv)
+@@ -763,6 +774,7 @@ int main(int argc, char **argv)
  		static const struct option long_options[] = {
  			{"all-symbols",     no_argument, &all_symbols,     1},
  			{"absolute-percpu", no_argument, &absolute_percpu, 1},
@@ -152,7 +152,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  
 --- a/scripts/link-vmlinux.sh
 +++ b/scripts/link-vmlinux.sh
-@@ -165,6 +165,10 @@ kallsyms()
+@@ -144,6 +144,10 @@ kallsyms()
  		kallsymopt="${kallsymopt} --absolute-percpu"
  	fi
  
@@ -161,5 +161,5 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 +	fi
 +
  	info KSYMS "${2}.S"
- 	scripts/kallsyms ${kallsymopt} ${1} > ${2}
- }
+ 	scripts/kallsyms ${kallsymopt} "${1}" > "${2}.S"
+ 
