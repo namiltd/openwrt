@@ -1,0 +1,69 @@
+--- a/net/wireless/core.c	2024-11-19 20:19:58.676000000 +0100
++++ b/net/wireless/core.c	2024-11-19 20:36:08.292000000 +0100
+@@ -165,11 +165,11 @@
+ 	list_for_each_entry(wdev, &rdev->wiphy.wdev_list, list) {
+ 		if (!wdev->netdev)
+ 			continue;
+-		wdev->netdev->features &= ~NETIF_F_NETNS_LOCAL;
++		wdev->netdev->netns_local = false;
+ 		err = dev_change_net_namespace(wdev->netdev, net, "wlan%d");
+ 		if (err)
+ 			break;
+-		wdev->netdev->features |= NETIF_F_NETNS_LOCAL;
++		wdev->netdev->netns_local = true;
+ 	}
+ 
+ 	if (err) {
+@@ -181,11 +181,11 @@
+ 						     list) {
+ 			if (!wdev->netdev)
+ 				continue;
+-			wdev->netdev->features &= ~NETIF_F_NETNS_LOCAL;
++			wdev->netdev->netns_local = false;
+ 			err = dev_change_net_namespace(wdev->netdev, net,
+ 							"wlan%d");
+ 			WARN_ON(err);
+-			wdev->netdev->features |= NETIF_F_NETNS_LOCAL;
++			wdev->netdev->netns_local = true;
+ 		}
+ 
+ 		return err;
+@@ -1504,7 +1504,7 @@
+ 		SET_NETDEV_DEVTYPE(dev, &wiphy_type);
+ 		wdev->netdev = dev;
+ 		/* can only change netns with wiphy */
+-		dev->features |= NETIF_F_NETNS_LOCAL;
++		dev->netns_local = false;
+ 
+ 		cfg80211_init_wdev(wdev);
+ 		break;
+--- a/backport-include/asm/unaligned.h	2024-11-19 21:03:59.108000000 +0100
++++ b/backport-include/asm/unaligned.h	2024-11-19 20:57:09.428000000 +0100
+@@ -1,6 +1,6 @@
+ #ifndef __BACKPORT_ASM_GENERIC_UNALIGNED_H
+ #define __BACKPORT_ASM_GENERIC_UNALIGNED_H
+-#include_next <asm/unaligned.h>
++#include_next <linux/unaligned.h>
+ 
+ #if LINUX_VERSION_IS_LESS(5,7,0)
+ static inline u32 __get_unaligned_be24(const u8 *p)
+--- a/net/mac80211/rc80211_minstrel_ht_debugfs.c	2024-10-04 18:14:44.000000000 +0200
++++ b/net/mac80211/rc80211_minstrel_ht_debugfs.c	2024-11-20 08:36:49.488000000 +0100
+@@ -187,7 +187,7 @@
+ 	.open = minstrel_ht_stats_open,
+ 	.read = minstrel_stats_read,
+ 	.release = minstrel_stats_release,
+-	.llseek = no_llseek,
++	.llseek = noop_llseek,
+ };
+ 
+ static char *
+@@ -323,7 +323,7 @@
+ 	.open = minstrel_ht_stats_csv_open,
+ 	.read = minstrel_stats_read,
+ 	.release = minstrel_stats_release,
+-	.llseek = no_llseek,
++	.llseek = noop_llseek,
+ };
+ 
+ void

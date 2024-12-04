@@ -1,0 +1,33 @@
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -22,7 +22,7 @@
+ #include <net/cfg80211.h>
+ #include <net/codel.h>
+ #include <net/ieee80211_radiotap.h>
+-#include <asm/unaligned.h>
++#include <linux/unaligned.h>
+ 
+ /**
+  * DOC: Introduction
+--- a/include/linux/ieee80211.h
++++ b/include/linux/ieee80211.h
+@@ -20,7 +20,7 @@
+ #include <linux/etherdevice.h>
+ #include <linux/bitfield.h>
+ #include <asm/byteorder.h>
+-#include <asm/unaligned.h>
++#include <linux/unaligned.h>
+ 
+ /*
+  * DS bit usage
+--- a/include/net/ieee80211_radiotap.h
++++ b/include/net/eee80211_radiotap.h
+@@ -18,7 +18,7 @@
+ #define __RADIOTAP_H
+ 
+ #include <linux/kernel.h>
+-#include <asm/unaligned.h>
++#include <linux/unaligned.h>
+ 
+ /**
+  * struct ieee80211_radiotap_header - base radiotap header

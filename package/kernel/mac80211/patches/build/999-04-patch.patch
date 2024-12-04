@@ -1,0 +1,22 @@
+--- a/drivers/net/wireless/intel/iwlwifi/mvm/d3.c	2024-11-19 20:19:58.676000000 +0100
++++ b/drivers/net/wireless/intel/iwlwifi/mvm/d3.c	2024-11-19 20:36:08.292000000 +0100
+@@ -3768,7 +3768,7 @@
+ }
+ 
+ const struct file_operations iwl_dbgfs_d3_test_ops = {
+-	.llseek = no_llseek,
++	.llseek = noop_llseek,
+ 	.open = iwl_mvm_d3_test_open,
+ 	.read = iwl_mvm_d3_test_read,
+ 	.release = iwl_mvm_d3_test_release,
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c	2024-11-19 20:19:58.676000000 +0100
+--- b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c	2024-11-19 20:19:58.676000000 +0100
+@@ -1184,7 +1184,7 @@
+ 
+ static const struct file_operations bus_reset_fops = {
+ 	.open	= simple_open,
+-	.llseek	= no_llseek,
++	.llseek	= noop_llseek,
+ 	.write	= bus_reset_write,
+ };
+ 

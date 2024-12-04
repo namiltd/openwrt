@@ -1,0 +1,10 @@
+--- a/drivers/net/wireless/ralink/rt2x00/rt2x00eeprom.c
++++ b/drivers/net/wireless/ralink/rt2x00/rt2x00eeprom.c
+@@ -19,6 +19,7 @@
+ 
+ #include "rt2x00.h"
+ #include "rt2x00soc.h"
++#include "rt2800lib.h"
+ 
+ static void rt2800lib_eeprom_swap(struct rt2x00_dev *rt2x00dev)
+ {
