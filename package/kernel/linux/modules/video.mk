@@ -129,7 +129,7 @@ define KernelPackage/fb
 	CONFIG_VT_HW_CONSOLE_BINDING=y
   FILES:=$(LINUX_DIR)/drivers/video/fbdev/core/fb.ko \
 	$(LINUX_DIR)/lib/fonts/font.ko \
-	$(LINUX_DIR)/drivers/video/fbdev/core/fb_io_fops.ko
+	$(LINUX_DIR)/drivers/video/fbdev/core/fb_io_fops.ko@lt6.12
   AUTOLOAD:=$(call AutoLoad,06,fb font)
 endef
 
@@ -138,8 +138,9 @@ define KernelPackage/fb/description
 endef
 
 define KernelPackage/fb/x86
-  FILES+=$(LINUX_DIR)/arch/x86/video/fbdev.ko
-  AUTOLOAD:=$(call AutoLoad,06,fbdev fb font)
+  FILES+=$(LINUX_DIR)/arch/x86/video/fbdev.ko@lt6.12 \
+	$(LINUX_DIR)/arch/x86/video/video-common.ko@ge6.12
+  AUTOLOAD:=$(call AutoLoad,06,fbdev@lt6.12 video-common@ge6.12 fb font)
 endef
 
 $(eval $(call KernelPackage,fb))
