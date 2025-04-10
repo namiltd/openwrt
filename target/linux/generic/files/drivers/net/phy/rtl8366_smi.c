@@ -254,7 +254,7 @@ static int __rtl8366_smi_read_reg(struct rtl8366_smi *smi, u32 addr, u32 *data)
 #define MDC_MDIO_WRITE_OP		0x0003
 #define MDC_REALTEK_PHY_ADDR		0x0
 
-static int __rtl8366_mdio_read_reg(struct rtl8366_smi *smi, u32 addr, u32 *data)
+int __rtl8366_mdio_read_reg(struct rtl8366_smi *smi, u32 addr, u32 *data)
 {
 	u32 phy_id = smi->phy_id;
 	struct mii_bus *mbus = smi->ext_mbus;
