@@ -197,7 +197,7 @@ Signed-off-by: Eddi De Pieri <eddi@depieri.net>
  	}
  	if (i >= IFX_PCIE_PHY_LOOP_CNT) {
  		printk(KERN_ERR "%s link up failed!!!!!\n", __func__);
-@@ -1045,17 +1079,73 @@ pcie_rc_initialize(int pcie_port)
+@@ -1045,20 +1079,76 @@ pcie_rc_initialize(int pcie_port)
  	return 0;
  }
  
@@ -272,7 +272,11 @@ Signed-off-by: Eddi De Pieri <eddi@depieri.net>
 +
      for (pcie_port = startup_port; pcie_port < IFX_PCIE_CORE_NR; pcie_port++){
  	if (pcie_rc_initialize(pcie_port) == 0) {
- 	    IFX_PCIE_PRINT(PCIE_MSG_INIT, "%s: ifx_pcie_cfg_base 0x%p\n", 
+-	    IFX_PCIE_PRINT(PCIE_MSG_INIT, "%s: ifx_pcie_cfg_base 0x%p\n", 
++	    IFX_PCIE_PRINT(PCIE_MSG_INIT, "%s: ifx_pcie_cfg_base 0x%p\n",
+                  __func__, PCIE_CFG_PORT_TO_BASE(pcie_port));
+             /* Otherwise, warning will pop up */
+             io_map_base = ioremap(PCIE_IO_PHY_PORT_TO_BASE(pcie_port), PCIE_IO_SIZE);
 @@ -1066,7 +1156,19 @@ static int __init ifx_pcie_bios_init(voi
                  IFX_PCIE_PRINT(PCIE_MSG_ERR, "%s io space ioremap failed\n", __func__);
                  return -ENOMEM;
@@ -334,7 +338,7 @@ Signed-off-by: Eddi De Pieri <eddi@depieri.net>
  #define IFX_REG_R32    ltq_r32
  #define IFX_REG_W32    ltq_w32
  #define CONFIG_IFX_PCIE_HW_SWAP
-@@ -54,21 +52,6 @@
+@@ -54,22 +52,7 @@
  #define OUT			((volatile u32*)(IFX_GPIO + 0x0070))
  
  
@@ -353,9 +357,11 @@ Signed-off-by: Eddi De Pieri <eddi@depieri.net>
 -    ifx_gpio_open_drain_set(IFX_PCIE_GPIO_RESET, ifx_pcie_gpio_module_id);*/
 -}
 -
- static inline void pcie_ahb_pmu_setup(void) 
+-static inline void pcie_ahb_pmu_setup(void) 
++static inline void pcie_ahb_pmu_setup(void)
  {
  	/* Enable AHB bus master/slave */
+ 	struct clk *clk;
 @@ -80,24 +63,6 @@ static inline void pcie_ahb_pmu_setup(vo
      //AHBS_PMU_SETUP(IFX_PMU_ENABLE);
  }
@@ -369,7 +375,7 @@ Signed-off-by: Eddi De Pieri <eddi@depieri.net>
 -    reg |= IFX_RCU_AHB_BE_PCIE_M;
 -    reg |= IFX_RCU_AHB_BE_PCIE_S;
 -    reg &= ~IFX_RCU_AHB_BE_XBAR_M;
--#else 
+-#else
 -    reg |= IFX_RCU_AHB_BE_PCIE_M;
 -    reg &= ~IFX_RCU_AHB_BE_PCIE_S;
 -    reg &= ~IFX_RCU_AHB_BE_XBAR_M;

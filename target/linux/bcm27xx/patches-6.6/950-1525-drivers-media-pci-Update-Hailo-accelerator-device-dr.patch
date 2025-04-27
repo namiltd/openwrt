@@ -962,7 +962,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +
 +    if (irq_source->sw_interrupts & HAILO_PCIE_SOC_CLOSE_IRQ) {
 +        hailo_info(board, "soc_irq_handler - HAILO_PCIE_SOC_CLOSE_IRQ\n");
-+        // always use bitmap=0xFFFFFFFF - it is ok to wake all interrupts since each handler will check if the stream was aborted or not. 
++        // always use bitmap=0xFFFFFFFF - it is ok to wake all interrupts since each handler will check if the stream was aborted or not.
 +        hailo_vdma_wakeup_interrupts(&board->vdma, &board->vdma.vdma_engines[DEFAULT_VDMA_ENGINE_INDEX],
 +            0xFFFFFFFF);
 +    }
@@ -1008,7 +1008,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
  
 -        if (irq_source.interrupt_bitmask & SOC_CLOSED_IRQ) {
 -            hailo_info(board, "hailo_irqhandler - SOC_CLOSED_IRQ\n");
--            // always use bitmap=0xFFFFFFFF - it is ok to wake all interrupts since each handler will check if the stream was aborted or not. 
+-            // always use bitmap=0xFFFFFFFF - it is ok to wake all interrupts since each handler will check if the stream was aborted or not.
 -            hailo_vdma_wakeup_interrupts(&board->vdma, &board->vdma.vdma_engines[DEFAULT_VDMA_ENGINE_INDEX],
 -                0xFFFFFFFF);
 -        }
@@ -1078,10 +1078,12 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 + * @return false if timed out, true if completed.
 + */
 +static bool wait_for_firmware_completion(struct completion *completion, unsigned int msecs)
-+{
+ {
+-    return (0 != wait_for_completion_timeout(fw_load_completion, msecs_to_jiffies(FIRMWARE_WAIT_TIMEOUT_MS)));
 +    return (0 != wait_for_completion_timeout(completion, msecs_to_jiffies(msecs)));
-+}
-+
+ }
+ 
+-static int hailo_load_soc_firmware(struct hailo_pcie_resources *resources,
 +/**
 + * Program one FW file descriptors to the vDMA engine.
 + *
@@ -1480,8 +1482,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 + * @return 0 on success, negative error code on failure. in any case all resurces are released.
 + */
 +static long pcie_write_firmware_batch_over_dma(struct hailo_pcie_board *board, u32 stage, u32 desc_page_size)
- {
--    return (0 != wait_for_completion_timeout(fw_load_completion, msecs_to_jiffies(FIRMWARE_WAIT_TIMEOUT_MS)));
++{
 +    long err = 0;
 +    struct hailo_vdma_engine *engine = &board->vdma.vdma_engines[PCI_VDMA_ENGINE_INDEX];
 +    u8 channel_index = 0;
@@ -1530,9 +1531,8 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +release_all:
 +    pcie_vdme_release_boot_resources(board, engine, &board->fw_boot.boot_dma_state);
 +    return err;
- }
- 
--static int hailo_load_soc_firmware(struct hailo_pcie_resources *resources,
++}
++
 +static int load_soc_firmware(struct hailo_pcie_board *board, struct hailo_pcie_resources *resources,
      struct device *dev, struct completion *fw_load_completion)
  {
@@ -1933,7 +1933,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
  
      // configure and start input channel
 -    depth = ceil_log2(input_descriptors_buffer->desc_list.desc_count);
-     // DMA Direction is only to get channel index - so 
+     // DMA Direction is only to get channel index - so
 -    err = hailo_vdma_start_channel(input_channel->host_regs, input_descriptors_buffer->dma_address, depth,
 +    err = hailo_vdma_start_channel(input_channel->host_regs, input_descriptors_buffer->dma_address, input_descriptors_buffer->desc_list.desc_count,
          board->vdma.hw->ddr_data_id);
@@ -1941,10 +1941,10 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
          hailo_dev_err(&board->pDev->dev, "Error starting vdma input channel index %u\n", params.input_channel_index);
 @@ -149,9 +150,8 @@ long hailo_soc_connect_ioctl(struct hail
      hailo_set_bit(params.input_channel_index, &context->soc_used_channels_bitmap);
-     
+ 
      // configure and start output channel
 -    depth = ceil_log2(output_descriptors_buffer->desc_list.desc_count);
-     // DMA Direction is only to get channel index - so 
+     // DMA Direction is only to get channel index - so
 -    err = hailo_vdma_start_channel(output_channel->host_regs, output_descriptors_buffer->dma_address, depth,
 +    err = hailo_vdma_start_channel(output_channel->host_regs, output_descriptors_buffer->dma_address, output_descriptors_buffer->desc_list.desc_count,
          board->vdma.hw->ddr_data_id);

@@ -181,15 +181,6 @@ Signed-off-by: Changhuang Liang <changhuang.liang@starfivetech.com>
  		((u32)(setting->crop_config.hkeep) << 8) | setting->crop_config.hperiod);
  
  	// SC AWB pixel sum config
-@@ -676,7 +676,7 @@ static int isp_set_ctrl_sc(struct stf_is
- 	reg_write(ispbase, 0xd4, CREATE_REG_VALUE(u16, &setting->awb_config.ws_ps_config.awb_ps_grbl, 2, 0xffff, 16));
- 
- 	// AF register
--	reg_write(ispbase, 0xc0, 
-+	reg_write(ispbase, 0xc0,
- 		((u32)(setting->af_config.es_hor_thr & 0x1ff) << 16) |
- 		((u32)(setting->af_config.es_ver_thr & 0xff) << 8) |
- 		((setting->af_config.ver_en & 0x1) << 3) |
 @@ -1217,7 +1217,7 @@ static int isp_get_interface_type(struct
  static int isp_set_stream(struct v4l2_subdev *sd, int enable)
  {
