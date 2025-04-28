@@ -364,7 +364,7 @@
 +    UInt32 _cyclicBufferPos, UInt32 _cyclicBufferSize, UInt32 _cutValue, 
 +    UInt32 *distances, UInt32 maxLen);
 +
-+/* 
++/*
 +Conditions:
 +  Mf_GetNumAvailableBytes_Func must be called before each Mf_GetMatchLen_Func.
 +  Mf_GetPointerToCurrentPos_Func's result must be used only before any other function
@@ -541,7 +541,7 @@
 +     0) Stream with end mark. That end mark adds about 6 bytes to compressed size.
 +     1) Stream without end mark. You must know exact uncompressed size to decompress such stream. */
 +
-+typedef enum 
++typedef enum
 +{
 +  LZMA_FINISH_ANY,   /* finish at any point */      
 +  LZMA_FINISH_END    /* block must be finished at the end */
@@ -562,7 +562,7 @@
 +     3) Check that output(srcLen) = compressedSize, if you know real compressedSize. 
 +        You must use correct finish mode in that case. */ 
 +
-+typedef enum 
++typedef enum
 +{
 +  LZMA_STATUS_NOT_SPECIFIED,               /* use main error code instead */
 +  LZMA_STATUS_FINISHED_WITH_MARK,          /* stream was finished with end mark. */
@@ -637,7 +637,7 @@
 +  SZ_OK
 +    status:
 +      LZMA_STATUS_FINISHED_WITH_MARK
-+      LZMA_STATUS_NOT_FINISHED 
++      LZMA_STATUS_NOT_FINISHED
 +      LZMA_STATUS_NEEDS_MORE_INPUT
 +      LZMA_STATUS_MAYBE_FINISHED_WITHOUT_MARK
 +  SZ_ERROR_DATA - Data error
@@ -654,7 +654,7 @@
 +   but you must use LzmaDec_DecodeToBuf instead of LzmaDec_DecodeToDic and you don't need
 +   to work with CLzmaDec variables manually.
 +
-+finishMode: 
++finishMode:
 +  It has meaning only if the decoding reaches output limit (*destLen).
 +  LZMA_FINISH_ANY - Decode just destLen bytes.
 +  LZMA_FINISH_END - Stream must be finished after (*destLen).
@@ -677,7 +677,7 @@
 +  SZ_OK
 +    status:
 +      LZMA_STATUS_FINISHED_WITH_MARK
-+      LZMA_STATUS_NOT_FINISHED 
++      LZMA_STATUS_NOT_FINISHED
 +      LZMA_STATUS_MAYBE_FINISHED_WITHOUT_MARK
 +  SZ_ERROR_DATA - Data error
 +  SZ_ERROR_MEM  - Memory allocation error
@@ -855,7 +855,7 @@
 +#endif
 +
 +#define MY_CDECL __cdecl
-+#define MY_STD_CALL __stdcall 
++#define MY_STD_CALL __stdcall
 +#define MY_FAST_CALL MY_NO_INLINE __fastcall 
 +
 +#else
@@ -987,8 +987,8 @@
 +
 +void MatchFinder_MoveBlock(CMatchFinder *p)
 +{
-+  memmove(p->bufferBase, 
-+    p->buffer - p->keepSizeBefore, 
++  memmove(p->bufferBase,
++    p->buffer - p->keepSizeBefore,
 +    (size_t)(p->streamPos - p->pos + p->keepSizeBefore));
 +  p->buffer = p->bufferBase + p->keepSizeBefore;
 +}
@@ -1001,7 +1001,7 @@
 +
 +void MatchFinder_ReadIfRequired(CMatchFinder *p)
 +{
-+  if (p->streamEndWasReached) 
++  if (p->streamEndWasReached)
 +    return;
 +  if (p->keepSizeAfter >= p->streamPos - p->pos)
 +    MatchFinder_ReadBlock(p);
@@ -1180,7 +1180,7 @@
 +}
 +
 +static UInt32 MatchFinder_GetSubValue(CMatchFinder *p) 
-+{ 
++{
 +  return (p->pos - p->historySize - 1) & kNormalizeMask; 
 +}
 +
@@ -1410,7 +1410,7 @@
 +  delta2 = p->pos - p->hash[hash2Value];
 +  curMatch = p->hash[kFix3HashSize + hashValue];
 +  
-+  p->hash[hash2Value] = 
++  p->hash[hash2Value] =
 +  p->hash[kFix3HashSize + hashValue] = p->pos;
 +
 +
@@ -1427,7 +1427,7 @@
 +    if (maxLen == lenLimit)
 +    {
 +      SkipMatchesSpec(lenLimit, curMatch, MF_PARAMS(p));
-+      MOVE_POS_RET; 
++      MOVE_POS_RET;
 +    }
 +  }
 +  GET_MATCHES_FOOTER(offset, maxLen)
@@ -1472,7 +1472,7 @@
 +    if (maxLen == lenLimit)
 +    {
 +      SkipMatchesSpec(lenLimit, curMatch, MF_PARAMS(p));
-+      MOVE_POS_RET; 
++      MOVE_POS_RET;
 +    }
 +  }
 +  if (maxLen < 3)
@@ -1519,7 +1519,7 @@
 +    if (maxLen == lenLimit)
 +    {
 +      p->son[p->cyclicBufferPos] = curMatch;
-+      MOVE_POS_RET; 
++      MOVE_POS_RET;
 +    }
 +  }
 +  if (maxLen < 3)
@@ -1545,7 +1545,7 @@
 +{
 +  do
 +  {
-+    SKIP_HEADER(2) 
++    SKIP_HEADER(2)
 +    HASH2_CALC;
 +    curMatch = p->hash[hashValue];
 +    p->hash[hashValue] = p->pos;
@@ -1587,7 +1587,7 @@
 +  do
 +  {
 +    UInt32 hash2Value, hash3Value;
-+    SKIP_HEADER(4) 
++    SKIP_HEADER(4)
 +    HASH4_CALC;
 +    curMatch = p->hash[kFix4HashSize + hashValue];
 +    p->hash[                hash2Value] =
@@ -1869,7 +1869,7 @@
 +      /* if (state < 4) state = 0; else if (state < 10) state -= 3; else state -= 6; */
 +      continue;
 +    }
-+    else             
++    else
 +    {
 +      UPDATE_1(prob);
 +      prob = probs + IsRep + state;
@@ -1910,7 +1910,7 @@
 +            UPDATE_0(prob);
 +            distance = rep1;
 +          }
-+          else 
++          else
 +          {
 +            UPDATE_1(prob);
 +            prob = probs + IsRepG2 + state;
@@ -2065,7 +2065,7 @@
 +          ptrdiff_t src = (ptrdiff_t)pos - (ptrdiff_t)dicPos;
 +          const Byte *lim = dest + curLen;
 +          dicPos += curLen;
-+          do 
++          do
 +            *(dest) = (Byte)*(dest + src); 
 +          while (++dest != lim);
 +        }
@@ -2152,7 +2152,7 @@
 +  return 0;
 +}
 +
-+typedef enum 
++typedef enum
 +{
 +  DUMMY_ERROR, /* unexpected end of input stream */
 +  DUMMY_LIT,
@@ -2212,7 +2212,7 @@
 +      }
 +      res = DUMMY_LIT;
 +    }
-+    else             
++    else
 +    {
 +      unsigned len;
 +      UPDATE_1_CHECK;
@@ -2253,7 +2253,7 @@
 +          {
 +            UPDATE_0_CHECK;
 +          }
-+          else 
++          else
 +          {
 +            UPDATE_1_CHECK;
 +            prob = probs + IsRepG2 + state;
@@ -2359,10 +2359,10 @@
 +}
 +
 +static void LzmaDec_InitDicAndState(CLzmaDec *p, Bool initDic, Bool initState) 
-+{ 
-+  p->needFlush = 1; 
-+  p->remainLen = 0; 
-+  p->tempBufSize = 0; 
++{
++  p->needFlush = 1;
++  p->remainLen = 0;
++  p->tempBufSize = 0;
 +
 +  if (initDic)
 +  {
@@ -2374,9 +2374,9 @@
 +    p->needInitState = 1;
 +}
 +
-+void LzmaDec_Init(CLzmaDec *p) 
-+{ 
-+  p->dicPos = 0; 
++void LzmaDec_Init(CLzmaDec *p)
++{
++  p->dicPos = 0;
 +  LzmaDec_InitDicAndState(p, True, True);
 +}
 +
@@ -2554,15 +2554,15 @@
 +}
 +
 +void LzmaDec_FreeProbs(CLzmaDec *p, ISzAlloc *alloc) 
-+{ 
-+  alloc->Free(alloc, p->probs);  
-+  p->probs = 0; 
++{
++  alloc->Free(alloc, p->probs);
++  p->probs = 0;
 +}
 +
 +static void LzmaDec_FreeDict(CLzmaDec *p, ISzAlloc *alloc) 
-+{ 
-+  alloc->Free(alloc, p->dic); 
-+  p->dic = 0; 
++{
++  alloc->Free(alloc, p->dic);
++  p->dic = 0;
 +}
 +
 +void LzmaDec_Free(CLzmaDec *p, ISzAlloc *alloc)
@@ -2573,7 +2573,7 @@
 +
 +SRes LzmaProps_Decode(CLzmaProps *p, const Byte *data, unsigned size)
 +{
-+  UInt32 dicSize; 
++  UInt32 dicSize;
 +  Byte d;
 +  
 +  if (size < LZMA_PROPS_SIZE)
@@ -2764,11 +2764,11 @@
 +
 +#define BSR2_RET(pos, res) { unsigned long i; _BitScanReverse(&i, (pos)); res = (i + i) + ((pos >> (i - 1)) & 1); }
 +
-+UInt32 GetPosSlot1(UInt32 pos) 
-+{ 
-+  UInt32 res; 
-+  BSR2_RET(pos, res); 
-+  return res; 
++UInt32 GetPosSlot1(UInt32 pos)
++{
++  UInt32 res;
++  BSR2_RET(pos, res);
++  return res;
 +}
 +#define GetPosSlot2(pos, res) { BSR2_RET(pos, res); }
 +#define GetPosSlot(pos, res) { if (pos < 2) res = pos; else BSR2_RET(pos, res); }
@@ -2815,26 +2815,26 @@
 +
 +typedef struct _COptimal
 +{
-+  UInt32 price;    
++  UInt32 price;
 +
 +  CState state;
 +  int prev1IsChar;
 +  int prev2;
 +
 +  UInt32 posPrev2;
-+  UInt32 backPrev2;     
++  UInt32 backPrev2;
 +
 +  UInt32 posPrev;
-+  UInt32 backPrev;     
++  UInt32 backPrev;
 +  UInt32 backs[LZMA_NUM_REPS];
 +} COptimal;
 +
 +#define kNumOpts (1 << 12)
 +
 +#define kNumLenToPosStates 4
-+#define kNumPosSlotBits 6 
-+#define kDicLogSizeMin 0 
-+#define kDicLogSizeMax 32 
++#define kNumPosSlotBits 6
++#define kDicLogSizeMin 0
++#define kDicLogSizeMax 32
 +#define kDistTableSizeMax (kDicLogSizeMax * 2)
 +
 +
@@ -2926,7 +2926,7 @@
 +  return SZ_OK;
 +}
 +
-+typedef struct 
++typedef struct
 +{
 +  CLzmaProb *litProbs;
 +
@@ -2968,7 +2968,7 @@
 +  UInt32 optimumCurrentIndex;
 +
 +  Bool longestMatchWasFound;
-+  UInt32 longestMatchLength;    
++  UInt32 longestMatchLength;
 +  UInt32 numDistancePairs;
 +
 +  COptimal opt[kNumOpts];
@@ -3226,8 +3226,8 @@
 +    }
 +    while (--p->cacheSize != 0);
 +    p->cache = (Byte)((UInt32)p->low >> 24);                      
-+  } 
-+  p->cacheSize++;                               
++  }
++  p->cacheSize++;
 +  p->low = (UInt32)p->low << 8;                           
 +}
 +
@@ -3279,7 +3279,7 @@
 +static void LitEnc_Encode(CRangeEnc *p, CLzmaProb *probs, UInt32 symbol)
 +{
 +  symbol |= 0x100;
-+  do 
++  do
 +  {
 +    RangeEnc_EncodeBit(p, probs + (symbol >> 8), (symbol >> 7) & 1);
 +    symbol <<= 1;
@@ -3291,7 +3291,7 @@
 +{
 +  UInt32 offs = 0x100;
 +  symbol |= 0x100;
-+  do 
++  do
 +  {
 +    matchByte <<= 1;
 +    RangeEnc_EncodeBit(p, probs + (offs + (matchByte & offs) + (symbol >> 8)), (symbol >> 7) & 1);
@@ -3355,7 +3355,7 @@
 +  UInt32 price = 0;
 +  UInt32 offs = 0x100;
 +  symbol |= 0x100;
-+  do 
++  do
 +  {
 +    matchByte <<= 1;
 +    price += GET_PRICEa(probs[offs + (matchByte & offs) + (symbol >> 8)], (symbol >> 7) & 1);
@@ -3562,7 +3562,7 @@
 +
 +static UInt32 GetRepLen1Price(CLzmaEnc *p, UInt32 state, UInt32 posState)
 +{
-+  return 
++  return
 +    GET_PRICE_0(p->isRepG0[state]) +
 +    GET_PRICE_0(p->isRep0Long[state][posState]);
 +}
@@ -3628,7 +3628,7 @@
 +  while (cur != 0);
 +  *backRes = p->opt[0].backPrev;
 +  p->optimumCurrentIndex  = p->opt[0].posPrev;
-+  return p->optimumCurrentIndex; 
++  return p->optimumCurrentIndex;
 +}
 +
 +#define LIT_PROBS(pos, prevByte) (p->litProbs + ((((pos) & p->lpMask) << p->lc) + ((prevByte) >> (8 - p->lc))) * 0x300)
@@ -3641,7 +3641,7 @@
 +  UInt32 repLens[LZMA_NUM_REPS];
 +  UInt32 repMaxIndex, i;
 +  UInt32 *matchDistances;
-+  Byte currentByte, matchByte; 
++  Byte currentByte, matchByte;
 +  UInt32 posState;
 +  UInt32 matchPrice, repMatchPrice;
 +  UInt32 lenEnd;
@@ -3729,7 +3729,7 @@
 +  {
 +    const CLzmaProb *probs = LIT_PROBS(position, *(data - 1));
 +    p->opt[1].price = GET_PRICE_0(p->isMatch[p->state][posState]) + 
-+        (!IsCharState(p->state) ? 
++        (!IsCharState(p->state) ?
 +          LitEnc_GetPriceMatched(probs, currentByte, matchByte, p->ProbPrices) :
 +          LitEnc_GetPrice(probs, currentByte, p->ProbPrices));
 +  }
@@ -3852,7 +3852,7 @@
 +    UInt32 posState;
 +    UInt32 curAnd1Price;
 +    COptimal *nextOpt;
-+    UInt32 matchPrice, repMatchPrice;  
++    UInt32 matchPrice, repMatchPrice;
 +    UInt32 numAvailableBytes;
 +    UInt32 startLen;
 +
@@ -3939,7 +3939,7 @@
 +    curOpt->backs[2] = reps[2];
 +    curOpt->backs[3] = reps[3];
 +
-+    curPrice = curOpt->price; 
++    curPrice = curOpt->price;
 +    nextIsChar = False;
 +    data = p->matchFinder.GetPointerToCurrentPos(p->matchFinderObj) - 1;
 +    currentByte = *data;
@@ -3950,11 +3950,11 @@
 +    curAnd1Price = curPrice + GET_PRICE_0(p->isMatch[state][posState]);
 +    {
 +      const CLzmaProb *probs = LIT_PROBS(position, *(data - 1));
-+      curAnd1Price += 
-+        (!IsCharState(state) ? 
++      curAnd1Price +=
++        (!IsCharState(state) ?
 +          LitEnc_GetPriceMatched(probs, currentByte, matchByte, p->ProbPrices) :
 +          LitEnc_GetPrice(probs, currentByte, p->ProbPrices));
-+    }   
++    }
 +
 +    nextOpt = &p->opt[cur + 1];
 +
@@ -4079,7 +4079,7 @@
 +          {
 +            UInt32 state2 = kRepNextStates[state];
 +            UInt32 posStateNext = (position + lenTest) & p->pbMask;
-+            UInt32 curAndLenCharPrice = 
++            UInt32 curAndLenCharPrice =
 +                price + p->repLenEnc.prices[posState][lenTest - 2] + 
 +                GET_PRICE_0(p->isMatch[state2][posStateNext]) +
 +                LitEnc_GetPriceMatched(LIT_PROBS(position + lenTest, data[lenTest - 1]),
@@ -4398,7 +4398,7 @@
 +  UInt32 tempPrices[kNumFullDistances];
 +  UInt32 i, lenToPosState;
 +  for (i = kStartPosModelIndex; i < kNumFullDistances; i++)
-+  { 
++  {
 +    UInt32 posSlot = GetPosSlot1(i);
 +    UInt32 footerBits = ((posSlot >> 1) - 1);
 +    UInt32 base = ((2 | (posSlot & 1)) << footerBits);
@@ -4766,8 +4766,8 @@
 +    FillAlignPrices(p);
 +  }
 +
-+  p->lenEnc.tableSize = 
-+  p->repLenEnc.tableSize = 
++  p->lenEnc.tableSize =
++  p->repLenEnc.tableSize =
 +      p->numFastBytes + 1 - LZMA_MATCH_LEN_MIN;
 +  LenPriceEnc_UpdateTables(&p->lenEnc, 1 << p->pb, p->ProbPrices);
 +  LenPriceEnc_UpdateTables(&p->repLenEnc, 1 << p->pb, p->ProbPrices);

@@ -66,7 +66,7 @@ Signed-off-by: George Moussalem <george.moussalem@outlook.com>
 +				  IPQ5018_PHY_MMD3_CDT_THRESH_CTRL7_VAL);
 +	phy_write_mmd(phydev, MDIO_MMD_PCS, IPQ5018_PHY_MMD3_CDT_THRESH_CTRL9,
 +				  IPQ5018_PHY_MMD3_CDT_THRESH_CTRL9_VAL);
-+	phy_write_mmd(phydev, MDIO_MMD_PCS, 
++	phy_write_mmd(phydev, MDIO_MMD_PCS,
 +				  IPQ5018_PHY_MMD3_CDT_THRESH_CTRL13,
 +				  IPQ5018_PHY_MMD3_CDT_THRESH_CTRL13_VAL);
 +	phy_write_mmd(phydev, MDIO_MMD_PCS, IPQ5018_PHY_MMD3_CDT_THRESH_CTRL3,

@@ -620,7 +620,7 @@
 +#define CONFIG_MTD_DEVICE               /* needed for mtdparts commands */
 +
 +/*
-+ * SATA 
++ * SATA
 + */
 +
 +#ifdef CONFIG_MVSATA_IDE

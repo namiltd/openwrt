@@ -1387,7 +1387,7 @@ Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
 +	struct snd_soc_codec *codec = codec_dai->codec;
 +	struct ac10x_priv *ac10x = snd_soc_codec_get_drvdata(codec);
 +
-+	AC101_DBG("id=%d freq=%d, dir=%d\n", 
++	AC101_DBG("id=%d freq=%d, dir=%d\n",
 +		clk_id, freq, dir);
 +
 +	ac10x->sysclk = freq;
@@ -2735,7 +2735,7 @@ Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
 +	 */
 +	ac108_multi_update_bits(PWR_CTRL6, 0x01 << LDO33ANA_ENABLE, 0x01 << LDO33ANA_ENABLE, ac10x);
 +	/**
-+	 * 0x07: 
++	 * 0x07:
 +	 * Control VREF output and micbias voltage ?
 +	 * REF faststart disable, enable Enable VREF (needed for Analog
 +	 * LDO and MICBIAS)
@@ -2996,7 +2996,7 @@ Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
 +			ac108_samp_res[samp_res].real_val);
 +
 +	/**
-+	 * 0x33: 
++	 * 0x33:
 +	 *  The 8-Low bit of LRCK period value. It is used to program
 +	 *  the number of BCLKs per channel of sample frame. This value
 +	 *  is interpreted as follow:
@@ -3036,7 +3036,7 @@ Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
 +	}
 +
 +	/**
-+	 * 0x35: 
++	 * 0x35:
 +	 * TX Encoding mode will add  4bits to mark channel number 
 +	 * TODO: need a chat to explain this 
 +	 */
@@ -3045,7 +3045,7 @@ Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
 + 				ac108_samp_res[samp_res].reg_val << SLOT_WIDTH_SEL, ac10x);
 +
 +	/**
-+	 * 0x60: 
++	 * 0x60:
 +	 * ADC Sample Rate synchronised with I2S1 clock zone 
 +	 */
 +	ac108_multi_update_bits(ADC_SPRC, 0x0f << ADC_FS_I2S1,
@@ -3131,11 +3131,11 @@ Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
 + *  33h,35h will be set in ac108_hw_params, It's BCLK width and
 + *  Sample Resolution.
 + * @author baozhu (17-6-20)
-+ * 
-+ * @param dai 
-+ * @param fmt 
-+ * 
-+ * @return int 
++ *
++ * @param dai
++ * @param fmt
++ *
++ * @return int
 + */
 +static int ac108_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 +{
@@ -3257,12 +3257,12 @@ Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
 +				0x00 << TX_SLOT_HIZ | 0x01 << TX_STATE, ac10x);
 +
 +	/**
-+	 * 0x60: 
++	 * 0x60:
 +	 * MSB / LSB First Select: This driver only support MSB First Select . 
 +	 * OUT2_MUTE,OUT1_MUTE shoule be set in widget. 
 +	 * LRCK = 1 BCLK width 
-+	 * Linear PCM 
-+	 *  
++	 * Linear PCM
++	 *
 +	 * TODO:pcm mode, bit[0:1] and bit[2] is special
 +	 */
 +	ac108_multi_update_bits(I2S_FMT_CTRL3,
@@ -3402,7 +3402,7 @@ Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
 +	if (ac10x->i2c101) {
 +		return ac101_aif_mute(dai, mute);
 +	}
-+	return 0;	
++	return 0;
 +}
 +
 +static const struct snd_soc_dai_ops ac108_dai_ops = {

@@ -321,10 +321,10 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +
 +    switch (board_type) {
 +    case HAILO_BOARD_TYPE_HAILO8:
-+        expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO8; 
++        expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO8;
 +        break;
 +    case HAILO_BOARD_TYPE_HAILO15:
-+        expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO15; 
++        expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO15;
 +        break;
 +    case HAILO_BOARD_TYPE_PLUTO:
 +        expected_firmware_magic = FIRMWARE_HEADER_MAGIC_PLUTO;
@@ -3981,7 +3981,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +    /* Double-check ASPM control.  If not disabled by the above, the
 +     * BIOS is preventing that from happening (or CONFIG_PCIEASPM is
 +     * not enabled); override by writing PCI config space directly.
-+     */                       
++     */
 +    err = pcie_capability_read_word(pdev, PCI_EXP_LNKCTL, &pdev_aspmc);
 +    if (err < 0) {
 +        hailo_err(board, "Couldn't read LNKCTL capability\n");

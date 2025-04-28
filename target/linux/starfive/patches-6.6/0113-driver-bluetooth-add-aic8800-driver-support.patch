@@ -466,7 +466,7 @@ Signed-off-by: ziv.xu <ziv.xu@starfive.com>
 +		break;
 +	case HCI_OP_LE_Set_Extended_Scan_Parameters:
 +		printk("HCI_OP_LE_Set_Extended_Scan_Parameters");
-+		break;	
++		break;
 +	case HCI_OP_Set_Event_Filter:
 +		printk("HCI_OP_Set_Event_Filter");
 +		break;
@@ -3392,8 +3392,8 @@ Signed-off-by: ziv.xu <ziv.xu@starfive.com>
 +		/* make sure interval is within allowed range */  
 +		interval = clamp((int)data->isoc_rx_ep->bInterval, 1, 16);  
 +		urb->interval = 1 << (interval - 1); 
-+	} else {  
-+		urb->interval = data->isoc_rx_ep->bInterval; 
++	} else {
++		urb->interval = data->isoc_rx_ep->bInterval;
 +	}
 +
 +	AICBT_INFO("urb->interval %d \r\n", urb->interval);
@@ -5767,7 +5767,7 @@ Signed-off-by: ziv.xu <ziv.xu@starfive.com>
 +        AICBT_INFO("No Mac Config for BT\n");
 +        return -1;
 +    }
-+    oldfs = get_fs(); 
++    oldfs = get_fs();
 +    set_fs(KERNEL_DS);
 +    bdaddr_file->f_op->llseek(bdaddr_file, 0, 0);
 +    bdaddr_file->f_op->read(bdaddr_file, buf, FACTORY_BT_BDADDR_STORAGE_LEN, &bdaddr_file->f_pos);
@@ -5963,7 +5963,7 @@ Signed-off-by: ziv.xu <ziv.xu@starfive.com>
 +
 +	printk("%s enter\r\n", __func__);
 +	memset(data, 0, 1024);
-+    switch(cmd) 
++    switch(cmd)
 +    {
 +        case SET_APCF_PARAMETER:
 +			printk("set apcf parameter\r\n");

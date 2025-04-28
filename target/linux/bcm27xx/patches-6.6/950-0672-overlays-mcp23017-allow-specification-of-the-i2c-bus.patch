@@ -101,18 +101,18 @@ See: https://github.com/raspberrypi/linux/pull/5650
 -			interrupt-controller;
 -			microchip,irq-mirror;
 -		};
-+	fragment@101 { 
-+		target = <&i2c0if>; 
-+		__dormant__ { 
-+			status = "okay"; 
-+		}; 
++	fragment@101 {
++		target = <&i2c0if>;
++		__dormant__ {
++			status = "okay";
++		};
 +	};
 +
-+	fragment@102 { 
-+		target = <&i2c0mux>; 
-+		__dormant__ { 
-+			status = "okay"; 
-+		}; 
++	fragment@102 {
++		target = <&i2c0mux>;
++		__dormant__ {
++			status = "okay";
++		};
  	};
  
  	__overrides__ {

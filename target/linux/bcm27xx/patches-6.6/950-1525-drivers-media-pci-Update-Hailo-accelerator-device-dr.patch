@@ -1182,7 +1182,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +        desc_num_left = (MAX_SG_DESCS_COUNT - 1) - channel->desc_program_num;
 +
 +        // prepare the transfer buffer to make sure all the fields are initialized
-+        transfer_buffer.sg_table = &channel->sg_table; 
++        transfer_buffer.sg_table = &channel->sg_table;
 +        transfer_buffer.size = min(remaining_size, (desc_num_left * HAILO_PCI_OVER_VDMA_PAGE_SIZE));
 +        // no need to check for overflow since the variables are constant and always desc_program_num <= max u16 (65536)
 +        // & the buffer max size is 256 Mb << 4G (max u32)
@@ -1467,7 +1467,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +
 +/**
 + * Write FW boot files over vDMA using multiple channels for timing optimizations.
-+ * 
++ *
 + * The function is divided into the following steps:
 + * 1) Allocate resources for the boot process.
 + * 2) Programs descriptors to point to the memory and start the vDMA.
