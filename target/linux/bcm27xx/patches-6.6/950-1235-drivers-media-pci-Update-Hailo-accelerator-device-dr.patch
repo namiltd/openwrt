@@ -85,28 +85,16 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
  /**
   * Copyright (c) 2019-2022 Hailo Technologies Ltd. All rights reserved.
   **/
-@@ -28,16 +28,18 @@ int FW_VALIDATION__validate_fw_header(ui
-     firmware_header_t *firmware_header = NULL;
-     u32 consumed_firmware_offset = *outer_consumed_firmware_offset;
-     u32 expected_firmware_magic = 0;
-- 
-+
-     firmware_header = (firmware_header_t *) (firmware_base_address + consumed_firmware_offset);
-     CONSUME_FIRMWARE(sizeof(firmware_header_t), -EINVAL);
- 
-     switch (board_type) {
+@@ -36,7 +36,9 @@ int FW_VALIDATION__validate_fw_header(ui
      case HAILO_BOARD_TYPE_HAILO8:
--        expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO8; 
-+        expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO8;
+         expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO8;
          break;
 +    case HAILO_BOARD_TYPE_HAILO10H_LEGACY:
      case HAILO_BOARD_TYPE_HAILO15:
--        expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO15; 
 +    case HAILO_BOARD_TYPE_HAILO10H:
-+        expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO15;
+         expected_firmware_magic = FIRMWARE_HEADER_MAGIC_HAILO15;
          break;
      case HAILO_BOARD_TYPE_PLUTO:
-         expected_firmware_magic = FIRMWARE_HEADER_MAGIC_PLUTO;
 --- a/drivers/media/pci/hailo/common/fw_validation.h
 +++ b/drivers/media/pci/hailo/common/fw_validation.h
 @@ -1,4 +1,4 @@
@@ -364,7 +352,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 -    HAILO_VDMA_INTERRUPTS_DOMAIN_MAX_ENUM = INT_MAX,
 -};
 -
- // We allow maximum 2 buffers per transfer since we may have an extra buffer 
+ // We allow maximum 2 buffers per transfer since we may have an extra buffer
  // to make sure each buffer is aligned to page size.
  #define HAILO_MAX_BUFFERS_PER_SINGLE_TRANSFER (2)
 @@ -460,6 +503,35 @@ struct hailo_vdma_launch_transfer_params
@@ -791,15 +779,6 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
          },
          .fw_filename = "hailo/pluto_fw.bin",
          .board_cfg = {
-@@ -225,7 +327,7 @@ int hailo_pcie_read_firmware_control(str
-     // Copy response buffer
-     hailo_resource_read_buffer(&resources->fw_access, PCIE_REQUEST_SIZE_OFFSET + (size_t)response_header_size,
-         command->buffer_len, &command->buffer);
--    
-+
-     return 0;
- }
- 
 @@ -253,93 +355,111 @@ int hailo_pcie_read_firmware_notificatio
      return hailo_read_firmware_notification(&notification_resource, notification);
  }
