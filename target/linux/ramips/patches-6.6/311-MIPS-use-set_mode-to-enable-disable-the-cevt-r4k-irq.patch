@@ -100,7 +100,7 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
  	depends on RTC_DRV_GOLDFISH
  	help
  	  Support for the timer/counter of goldfish-rtc
-+ 
++
 +config CEVT_SYSTICK_QUIRK
 +	bool
 +	default n

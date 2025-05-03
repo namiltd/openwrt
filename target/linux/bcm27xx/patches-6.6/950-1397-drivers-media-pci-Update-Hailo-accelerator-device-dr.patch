@@ -1751,7 +1751,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +
 +        if (irq_source.interrupt_bitmask & SOC_CLOSED_IRQ) {
 +            hailo_info(board, "hailo_irqhandler - SOC_CLOSED_IRQ\n");
-+            // always use bitmap=0xFFFFFFFF - it is ok to wake all interrupts since each handler will check if the stream was aborted or not. 
++            // always use bitmap=0xFFFFFFFF - it is ok to wake all interrupts since each handler will check if the stream was aborted or not.
 +            hailo_vdma_wakeup_interrupts(&board->vdma, &board->vdma.vdma_engines[DEFAULT_VDMA_ENGINE_INDEX],
 +                0xFFFFFFFF);
          }
@@ -2953,7 +2953,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +    }
 +
 +    hailo_pcie_soc_read_response(&board->pcie_resources, response);
-+    
++
 +    if (response->status < 0) {
 +        hailo_err(board, "soc control failed with status=%d\n", response->status);
 +        return response->status;
@@ -3029,7 +3029,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +
 +    // configure and start input channel
 +    depth = ceil_log2(input_descriptors_buffer->desc_list.desc_count);
-+    // DMA Direction is only to get channel index - so 
++    // DMA Direction is only to get channel index - so
 +    err = hailo_vdma_start_channel(input_channel->host_regs, input_descriptors_buffer->dma_address, depth,
 +        board->vdma.hw->ddr_data_id);
 +    if (err < 0) {
@@ -3039,10 +3039,10 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +
 +    // Store the input channels state in bitmap (open)
 +    hailo_set_bit(params.input_channel_index, &context->soc_used_channels_bitmap);
-+    
++
 +    // configure and start output channel
 +    depth = ceil_log2(output_descriptors_buffer->desc_list.desc_count);
-+    // DMA Direction is only to get channel index - so 
++    // DMA Direction is only to get channel index - so
 +    err = hailo_vdma_start_channel(output_channel->host_regs, output_descriptors_buffer->dma_address, depth,
 +        board->vdma.hw->ddr_data_id);
 +    if (err < 0) {
@@ -3087,7 +3087,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 +    return soc_control(board, &request, &response);
 +}
 +
-+long hailo_soc_close_ioctl(struct hailo_pcie_board *board, struct hailo_vdma_controller *controller, 
++long hailo_soc_close_ioctl(struct hailo_pcie_board *board, struct hailo_vdma_controller *controller,
 +    struct hailo_file_context *context, unsigned long arg)
 +{
 +    struct hailo_soc_close_params params;
@@ -3501,7 +3501,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
 -            hailo_vdma_engine_disable_channels(engine, channels_bitmap);
 +    for_each_vdma_engine(controller, engine, engine_index) {
 +        if (context->enabled_channels_bitmap[engine_index]) {
-+            hailo_dev_info(controller->dev, "Disabling channels for engine %zu, channels bitmap 0x%x\n", engine_index, 
++            hailo_dev_info(controller->dev, "Disabling channels for engine %zu, channels bitmap 0x%x\n", engine_index,
 +            context->enabled_channels_bitmap[engine_index]);
 +            hailo_vdma_engine_disable_channels(engine, context->enabled_channels_bitmap[engine_index]);
  
@@ -3519,7 +3519,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
      }
  }
  
-+void hailo_vdma_wakeup_interrupts(struct hailo_vdma_controller *controller, struct hailo_vdma_engine *engine, 
++void hailo_vdma_wakeup_interrupts(struct hailo_vdma_controller *controller, struct hailo_vdma_engine *engine,
 +    u32 channels_bitmap)
 +{
 +    unsigned long irq_saved_flags = 0;
@@ -3585,7 +3585,7 @@ Signed-off-by: Naushir Patuck <naush@raspberrypi.com>
  void hailo_vdma_file_context_finalize(struct hailo_vdma_file_context *context,
      struct hailo_vdma_controller *controller, struct file *filp);
  
-+void hailo_vdma_wakeup_interrupts(struct hailo_vdma_controller *controller, struct hailo_vdma_engine *engine, 
++void hailo_vdma_wakeup_interrupts(struct hailo_vdma_controller *controller, struct hailo_vdma_engine *engine,
 +    u32 channels_bitmap);
  void hailo_vdma_irq_handler(struct hailo_vdma_controller *controller, size_t engine_index,
      u32 channels_bitmap);

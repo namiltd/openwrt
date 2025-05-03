@@ -4,7 +4,7 @@
  	model = "Helios4";
  	compatible = "kobol,helios4", "marvell,armada388",
  		"marvell,armada385", "marvell,armada380";
-+		
++
 +	aliases {
 +		led-boot = &led_status;
 +		led-failsafe = &led_status;
