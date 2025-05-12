@@ -105,6 +105,7 @@ define KernelPackage/fb
   DEPENDS:=@DISPLAY_SUPPORT
   KCONFIG:= \
 	CONFIG_FB \
+	CONFIG_FB_IOMEM_FOPS@lt6.8 \
 	CONFIG_FB_DEVICE=y \
 	CONFIG_FB_MXS=n \
 	CONFIG_FB_SM750=n \
@@ -625,8 +626,11 @@ define KernelPackage/drm-radeon
   DEPENDS:=@TARGET_x86 @DISPLAY_SUPPORT +kmod-backlight +kmod-drm-kms-helper \
 	+kmod-drm-ttm +kmod-drm-ttm-helper +kmod-i2c-algo-bit +radeon-firmware \
 	+kmod-drm-display-helper +kmod-acpi-video +kmod-drm-suballoc-helper
-  KCONFIG:=CONFIG_DRM_RADEON
-  FILES:=$(LINUX_DIR)/drivers/gpu/drm/radeon/radeon.ko
+  KCONFIG:= \
+	CONFIG_DRM_RADEON \
+	CONFIG_FB_IOMEM_FOPS@ge6.8
+  FILES:=$(LINUX_DIR)/drivers/gpu/drm/radeon/radeon.ko \
+	$(LINUX_DIR)/drivers/video/fbdev/core/fb_io_fops.ko@ge6.8
   AUTOLOAD:=$(call AutoProbe,radeon)
 endef
 
