@@ -429,9 +429,9 @@ Acked-by: Jeff Johnson <quic_jjohnson@quicinc.com>
  			complete(&ar->peer_assoc_done);
  			complete(&ar->peer_delete_done);
 @@ -1312,6 +1343,7 @@ struct ath12k_base *ath12k_core_alloc(st
- 	INIT_WORK(&ab->restart_work, ath12k_core_restart);
  	INIT_WORK(&ab->reset_work, ath12k_core_reset);
  	INIT_WORK(&ab->rfkill_work, ath12k_rfkill_work);
+ 	INIT_WORK(&ab->dump_work, ath12k_coredump_upload);
 +	INIT_WORK(&ab->update_11d_work, ath12k_update_11d);
  
  	timer_setup(&ab->rx_replenish_retry, ath12k_ce_rx_replenish_retry, 0);
