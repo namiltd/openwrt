@@ -25,9 +25,9 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
 @@ -719,6 +719,7 @@ static struct ath11k_hw_params ath11k_hw
- 		.smp2p_wow_exit = false,
  		.support_fw_mac_sequence = false,
  		.support_dual_stations = false,
+ 		.pdev_suspend = false,
 +		.reo_status_poll = true,
  	},
  	{
@@ -155,9 +155,9 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 --- a/drivers/net/wireless/ath/ath11k/hw.h
 +++ b/drivers/net/wireless/ath/ath11k/hw.h
 @@ -232,6 +232,7 @@ struct ath11k_hw_params {
- 	bool smp2p_wow_exit;
  	bool support_fw_mac_sequence;
  	bool support_dual_stations;
+ 	bool pdev_suspend;
 +	bool reo_status_poll;
  };
  

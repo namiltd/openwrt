@@ -61,7 +61,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  	}
  }
  
-@@ -1087,6 +1089,49 @@ static bool cfg80211_get_chans_dfs_avail
+@@ -1087,6 +1089,53 @@ static bool cfg80211_get_chans_dfs_avail
  	return true;
  }
  
@@ -72,9 +72,13 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 +{
 +	struct ieee80211_channel *c;
 +	u32 freq, start_freq, end_freq;
++	struct cfg80211_chan_def * chandef = {};
 +
-+	start_freq = cfg80211_get_start_freq(center_freq, bandwidth);
-+	end_freq = cfg80211_get_end_freq(center_freq, bandwidth);
++	chandef->center_freq1 = center_freq;
++	chandef->width = bandwidth;
++
++	start_freq = cfg80211_get_start_freq(chandef, 1);
++	end_freq = cfg80211_get_end_freq(chandef, 1);
 +
 +	/*
 +	 * Check entire range of channels for the bandwidth.
