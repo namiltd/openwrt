@@ -108,7 +108,7 @@ do { \
 } while (0)
 #endif /* end of +++ */
 
-#define N_MSG(evt, fmt, args...)
+#define N_MSG(evt, fmt, args...) do {} while (0)
 /*
 do {    \
     if ((DBG_EVT_##evt) & sd_debug_zone[host->id]) { \
@@ -126,8 +126,8 @@ do { \
 
 #if 1
 //defined CONFIG_MTK_MMC_CD_POLL
-#define INIT_MSG(fmt, args...)
-#define IRQ_MSG(fmt, args...)
+#define INIT_MSG(fmt, args...) do {} while (0);
+#define IRQ_MSG(fmt, args...) do {} while (0);
 #else
 #define INIT_MSG(fmt, args...) \
 do { \
