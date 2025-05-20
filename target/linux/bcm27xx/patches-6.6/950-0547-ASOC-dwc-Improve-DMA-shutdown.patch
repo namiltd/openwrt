@@ -18,7 +18,7 @@ Signed-off-by: Phil Elwell <phil@raspberrypi.com>
  #include <linux/slab.h>
  #include <linux/pm_runtime.h>
 -#include <sound/designware_i2s.h>
-+#include <sound/designware_i2s.h> 
++#include <sound/designware_i2s.h>
  #include <sound/pcm.h>
  #include <sound/pcm_params.h>
  #include <sound/soc.h>
