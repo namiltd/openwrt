@@ -1,0 +1,11 @@
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+@@ -645,7 +645,7 @@ static struct platform_driver brcmf_pd =
+ #if LINUX_VERSION_IS_GEQ(6,13,0)
+ 	.remove		= brcmf_common_pd_remove,
+ #else
+-	.remove = bp_brcmf_common_pd_remove,
++	.remove_new = brcmf_common_pd_remove,
+ #endif
+ 	
+ 	.driver		= {
