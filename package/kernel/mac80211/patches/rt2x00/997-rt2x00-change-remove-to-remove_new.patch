@@ -1,14 +1,14 @@
 --- a/drivers/net/wireless/ralink/rt2x00/rt2800soc.c
 +++ b/drivers/net/wireless/ralink/rt2x00/rt2800soc.c
-@@ -273,7 +273,7 @@ static struct platform_driver rt2800soc_
- 		.of_match_table	= rt2880_wmac_match,
- 	},
- 	.probe		= rt2800soc_probe,
--	.remove		= rt2x00soc_remove,
-+	.remove_new	= rt2x00soc_remove,
+@@ -276,7 +276,7 @@ static struct platform_driver rt2800soc_
+ #if LINUX_VERSION_IS_GEQ(6,13,0)
+ 	.remove		= rt2x00soc_remove,
+ #else
+-	.remove = bp_rt2x00soc_remove,
++	.remove_new = rt2x00soc_remove,
+ #endif
+ 	
  	.suspend	= rt2x00soc_suspend,
- 	.resume		= rt2x00soc_resume,
- };
 --- a/drivers/net/wireless/ralink/rt2x00/rt2x00soc.c
 +++ b/drivers/net/wireless/ralink/rt2x00/rt2x00soc.c
 @@ -124,7 +124,7 @@ exit_free_device:
