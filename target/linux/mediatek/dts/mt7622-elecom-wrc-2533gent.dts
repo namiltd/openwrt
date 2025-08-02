@@ -449,6 +449,17 @@
 		};
 	};
 
+	gmac1: mac@1 {
+		compatible = "mediatek,eth-mac";
+		reg = <1>;
+		phy-mode = "rgmii";
+		fixed-link {
+			speed = <1000>;
+			full-duplex;
+			pause;
+		};
+	};
+
 	mdio: mdio-bus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -519,9 +530,21 @@
 
 				port@6 {
 					reg = <6>;
-					label = "cpu";
+					label = "cpu_sgmii";
 					ethernet = <&gmac0>;
 					phy-mode = "sgmii";
+					fixed-link {
+						speed = <1000>;
+						full-duplex;
+						pause;
+					};
+				};
+
+				port@7 {
+					reg = <7>;
+					label = "cpu_rgmii";
+					ethernet = <&gmac1>;
+					phy-mode = "rgmii";
 					fixed-link {
 						speed = <1000>;
 						full-duplex;
