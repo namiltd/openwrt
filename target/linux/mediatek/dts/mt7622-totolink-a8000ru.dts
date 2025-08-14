@@ -205,6 +205,21 @@
 		};
 	};
 
+	gmac1: mac@1 {
+		compatible = "mediatek,eth-mac";
+		reg = <1>;
+		label = "wan";
+		phy-mode = "rgmii";
+		phy-handle = <&phy4>;
+		nvmem-cells = <&macaddr_factory_24>;
+		nvmem-cell-names = "mac-address";
+		fixed-link {
+			speed = <1000>;
+			full-duplex;
+			pause;
+		};
+	};
+
 	mdio: mdio-bus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -265,14 +280,6 @@
 					reg = <3>;
 					label = "lan4";
 					phy-handle = <&phy3>;
-				};
-
-				port@4 {
-					reg = <4>;
-					label = "wan";
-					nvmem-cells = <&macaddr_factory_24>;
-					nvmem-cell-names = "mac-address";
-					phy-handle = <&phy4>;
 				};
 
 				port@6 {
