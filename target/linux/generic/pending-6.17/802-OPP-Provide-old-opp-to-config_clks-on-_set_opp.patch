@@ -67,11 +67,11 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
  		 * equivalent to a clk_set_rate()
  		 */
  		if (!_get_opp_count(opp_table)) {
--			ret = opp_table->config_clks(dev, opp_table, NULL,
-+			ret = opp_table->config_clks(dev, opp_table, NULL, NULL,
- 						     &target_freq, false);
- 			goto put_opp_table;
+-			return opp_table->config_clks(dev, opp_table, NULL,
++			return opp_table->config_clks(dev, opp_table, NULL, NULL,
+ 						      &target_freq, false);
  		}
+ 
 --- a/include/linux/pm_opp.h
 +++ b/include/linux/pm_opp.h
 @@ -50,7 +50,8 @@ typedef int (*config_regulators_t)(struc
