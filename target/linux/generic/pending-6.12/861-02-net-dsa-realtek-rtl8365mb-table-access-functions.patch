@@ -15,7 +15,7 @@ Signed-off-by: Luiz Angelo Daros de Luca <luizluca@gmail.com>
   */
  #define RTL8365MB_STATS_INTERVAL_JIFFIES	(3 * HZ)
  
-+/* Table access registesr */
++/* Table access registers */
 +#define RTL8365MB_TABLE_CONTROL_REG		0x0500
 +#define   RTL8365MB_TABLE_CONTROL_TABLE_MASK	GENMASK(2, 0)
 +#define   RTL8365MB_TABLE_CONTROL_COMMAND_MASK	GENMASK(3, 3)
@@ -110,7 +110,7 @@ Signed-off-by: Luiz Angelo Daros de Luca <luizluca@gmail.com>
 +		/* 10th register uses only 4 less significant bits (TODO: not tested) */
 +		if (val_size == 10)
 +			ret = regmap_update_bits(priv->map,
-+					RTL8365MB_TABLE_WRITE_DATA_REG_BASE,
++					RTL8365MB_TABLE_WRITE_DATA_REG_BASE + 9,
 +					RTL8365MB_TABLE_10TH_DATA_REG_MASK,
 +					FIELD_PREP(RTL8365MB_TABLE_10TH_DATA_REG_MASK, val[9]));
 +		if (ret)

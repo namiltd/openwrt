@@ -32,7 +32,7 @@ Signed-off-by: Luiz Angelo Daros de Luca <luizluca@gmail.com>
 +	for (vlanmc_idx = 1; vlanmc_idx < RTL8365MB_VLAN_MC_CONF_SIZE; vlanmc_idx++) {
  		ret = regmap_bulk_read(priv->map,
  				       RTL8365MB_VLAN_MC_CONF_REG(vlanmc_idx),
- 				       &vlan_entry,
+ 				       vlan_entry,
 @@ -2624,6 +2625,68 @@ static int rtl8365mb_reset_chip(struct r
  					20000, 1e6);
  }
@@ -84,7 +84,7 @@ Signed-off-by: Luiz Angelo Daros de Luca <luizluca@gmail.com>
 +	rtl8365mb_vlanmc_buf(&vlanmc, vlan_entry);
 +	ret = regmap_bulk_write(priv->map,
 +		       RTL8365MB_VLAN_MC_CONF_REG(vlanmc_idx),
-+		       &vlan_entry,
++		       vlan_entry,
 +		       RTL8365MB_VLAN_MC_CONF_ENTRY_SIZE);
 +	if (ret) {
 +		dev_err(priv->dev, "Failed to write vlan MC entry (vlan 0)\n");

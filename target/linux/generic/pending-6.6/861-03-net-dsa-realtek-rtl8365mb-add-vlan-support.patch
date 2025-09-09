@@ -28,7 +28,7 @@ Signed-off-by: Luiz Angelo Daros de Luca <luizluca@gmail.com>
 +#define RTL8365MB_VLAN_CTRL_REG			0x07A8
 +#define   RTL8365MB_VLAN_CTRL_EN_VLAN_MASK	GENMASK(0, 0)
 +
-+/* VLAN filtering registesr */
++/* VLAN filtering registers */
 +#define RTL8365MB_VLAN_INGRESS_REG    0x07A9
 +#define RTL8365MB_VLAN_INGRESS_MASK   GENMASK(10, 0)
 +
@@ -275,7 +275,7 @@ Signed-off-by: Luiz Angelo Daros de Luca <luizluca@gmail.com>
 +	for (vlanmc_idx = 0; vlanmc_idx < RTL8365MB_VLAN_MC_CONF_SIZE; vlanmc_idx++) {
 +		ret = regmap_bulk_read(priv->map,
 +				       RTL8365MB_VLAN_MC_CONF_REG(vlanmc_idx),
-+				       &vlan_entry,
++				       vlan_entry,
 +				       RTL8365MB_VLAN_MC_CONF_ENTRY_SIZE);
 +		if (ret) {
 +			if (extack)
@@ -388,7 +388,7 @@ Signed-off-by: Luiz Angelo Daros de Luca <luizluca@gmail.com>
 +
 +	ret = regmap_bulk_write(priv->map,
 +		       RTL8365MB_VLAN_MC_CONF_REG(vlanmc_idx),
-+		       &vlan_entry,
++		       vlan_entry,
 +		       RTL8365MB_VLAN_MC_CONF_ENTRY_SIZE);
 +
 +	if (ret) {
