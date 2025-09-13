@@ -1,0 +1,11 @@
+--- a/log/logread.c
++++ b/log/logread.c
+@@ -333,7 +333,7 @@ int main(int argc, char **argv)
+ 			ubus_socket = optarg;
+ 			break;
+ 		case 'r':
+-			log_ip = optarg++;
++			log_ip = optarg;
+ 			log_port = argv[optind++];
+ 			break;
+ 		case 'F':
