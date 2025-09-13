@@ -1,0 +1,61 @@
+--- a/log/logread.c
++++ b/log/logread.c
+@@ -157,7 +157,7 @@ static int log_notify(struct blob_attr *
+ 			return 0;
+ 
+ 	m = blobmsg_get_string(tb[LOG_MSG]);
+-	if (regexp_pattern &&
++	if (regexp_pattern && m &&
+ 	    regexec(&regexp_preg, m, 0, NULL, 0) == REG_NOMATCH)
+ 		return 0;
+ 	t = blobmsg_get_u64(tb[LOG_TIME]) / 1000;
+@@ -167,7 +167,8 @@ static int log_notify(struct blob_attr *
+ 				(unsigned long)t, t_ms);
+ 	}
+ 	c = ctime(&t);
+-	c[strlen(c) - 1] = '\0';
++	if (c && strlen(c) > 0)
++		c[strlen(c) - 1] = '\0';
+ 
+ 	if (log_type == LOG_NET) {
+ 		int err;
+@@ -192,7 +193,7 @@ static int log_notify(struct blob_attr *
+ 			err = write(sender.fd, buf, strlen(buf));
+ 		else {
+ 			size_t buflen = strlen(buf);
+-			if (!log_trailer_null)
++			if (!log_trailer_null && buflen < sizeof(buf))
+ 				buf[buflen] = '\n';
+ 			err = send(sender.fd, buf, buflen + 1, 0);
+ 		}
+@@ -214,7 +215,7 @@ static int log_notify(struct blob_attr *
+ 		ret = write(sender.fd, buf, strlen(buf));
+ 	}
+ 
+-	if (log_type == LOG_FILE)
++	if (log_type == LOG_FILE && sender.fd >= 0)
+ 		fsync(sender.fd);
+ 
+ 	return ret;
+@@ -250,13 +251,20 @@ static void logread_fd_data_cb(struct us
+ 		int len, cur_len;
+ 
+ 		a = (void*) ustream_get_read_buf(s, &len);
+-		if (len < sizeof(*a))
++		if (!a || len < sizeof(*a))
+ 			break;
+ 
+ 		cur_len = blob_len(a) + sizeof(*a);
+ 		if (len < cur_len)
+ 			break;
+ 
++		// skip overly large messages
++		if (cur_len > 64*1024) {
++			fprintf(stderr, "logread: skipping overly large log message\n");
++			ustream_consume(s, cur_len);
++			continue;
++		}
++
+ 		log_notify(a);
+ 		ustream_consume(s, cur_len);
+ 	}
