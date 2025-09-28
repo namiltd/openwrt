@@ -1,0 +1,31 @@
+--- a/arch/mips/kernel/process.c
++++ b/arch/mips/kernel/process.c
+@@ -709,6 +709,16 @@ unsigned long mips_stack_top(void)
+ 	return top;
+ }
+ 
++#ifdef CONFIG_NET_RALINK_MT7620
++static u32 simple_random_u32_below(u32 max) {
++    static u32 seed = 1;
++    seed ^= seed << 13;
++    seed ^= seed >> 17;
++    seed ^= seed << 5;
++    return seed % max;
++}
++#endif
++
+ /*
+  * Don't forget that the stack pointer must be aligned on a 8 bytes
+  * boundary for 32-bits ABI and 16 bytes for 64-bits ABI.
+@@ -716,7 +726,11 @@ unsigned long mips_stack_top(void)
+ unsigned long arch_align_stack(unsigned long sp)
+ {
+ 	if (!(current->personality & ADDR_NO_RANDOMIZE) && randomize_va_space)
++#ifdef CONFIG_NET_RALINK_MT7620
++		sp -= simple_random_u32_below(PAGE_SIZE);
++#else
+ 		sp -= get_random_u32_below(PAGE_SIZE);
++#endif
+ 
+ 	return sp & ALMASK;
+ }
