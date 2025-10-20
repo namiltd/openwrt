@@ -1,0 +1,70 @@
+From: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+Date: Sun, 19 Oct 2025 19:00:34 +0200
+Subject: [PATCH] random: disable local IRQ around get_random_u32_below on MT7620
+
+Disable local IRQs when sampling small ranges in get_random_u32_below
+on CONFIG_NET_RALINK_MT7620 to avoid reentrancy issues on that platform.
+
+Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+
+--- a/include/linux/random.h
++++ b/include/linux/random.h
+@@ -7,6 +7,10 @@
+ #include <linux/kernel.h>
+ #include <linux/list.h>
+ 
++#ifdef CONFIG_NET_RALINK_MT7620
++#include <linux/irqflags.h>
++#endif
++
+ #include <uapi/linux/random.h>
+ 
+ struct notifier_block;
+@@ -59,6 +63,9 @@ u32 __get_random_u32_below(u32 ceil);
+  */
+ static inline u32 get_random_u32_below(u32 ceil)
+ {
++#ifdef CONFIG_NET_RALINK_MT7620
++	unsigned long flags;
++#endif
+ 	if (!__builtin_constant_p(ceil))
+ 		return __get_random_u32_below(ceil);
+ 
+@@ -73,19 +80,34 @@ static inline u32 get_random_u32_below(u
+ 	BUILD_BUG_ON_MSG(!ceil, "get_random_u32_below() must take ceil > 0");
+ 	if (ceil <= 1)
+ 		return 0;
++#ifdef CONFIG_NET_RALINK_MT7620
++	local_irq_save(flags);
++#endif
+ 	for (;;) {
+ 		if (ceil <= 1U << 8) {
+ 			u32 mult = ceil * get_random_u8();
+-			if (likely(is_power_of_2(ceil) || (u8)mult >= (1U << 8) % ceil))
++			if (likely(is_power_of_2(ceil) || (u8)mult >= (1U << 8) % ceil)) {
++#ifdef CONFIG_NET_RALINK_MT7620
++				local_irq_restore(flags);
++#endif
+ 				return mult >> 8;
++			}
+ 		} else if (ceil <= 1U << 16) {
+ 			u32 mult = ceil * get_random_u16();
+-			if (likely(is_power_of_2(ceil) || (u16)mult >= (1U << 16) % ceil))
++			if (likely(is_power_of_2(ceil) || (u16)mult >= (1U << 16) % ceil)) {
++#ifdef CONFIG_NET_RALINK_MT7620
++				local_irq_restore(flags);
++#endif
+ 				return mult >> 16;
++			}
+ 		} else {
+ 			u64 mult = (u64)ceil * get_random_u32();
+-			if (likely(is_power_of_2(ceil) || (u32)mult >= -ceil % ceil))
++			if (likely(is_power_of_2(ceil) || (u32)mult >= -ceil % ceil)) {
++#ifdef CONFIG_NET_RALINK_MT7620
++				local_irq_restore(flags);
++#endif
+ 				return mult >> 32;
++			}
+ 		}
+ 	}
+ }
