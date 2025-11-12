@@ -1,0 +1,135 @@
+--- a/drivers/leds/led-triggers.c
++++ b/drivers/leds/led-triggers.c
+@@ -33,6 +33,12 @@ trigger_relevant(struct led_classdev *le
+ 	return !trig->trigger_type || trig->trigger_type == led_cdev->trigger_type;
+ }
+ 
++/* 
++ * core: accept "<trigger>" or "<trigger>:<params>" and pass params via led_cdev->params.
++ * - If a colon is present, the RHS is duplicated and stored in led_cdev->params.
++ * - The trigger's activate callback may consume the pointer (free it and set to NULL).
++ * - If the trigger does not consume it, core frees the buffer after activate returns.
++ */
+ ssize_t led_trigger_write(struct file *filp, struct kobject *kobj,
+ 			  struct bin_attribute *bin_attr, char *buf,
+ 			  loff_t pos, size_t count)
+@@ -41,6 +47,10 @@ ssize_t led_trigger_write(struct file *f
+ 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+ 	struct led_trigger *trig;
+ 	int ret = count;
++	char *tmp = NULL;
++	char *params = NULL;
++	char *pcolon;
++	bool found = false;
+ 
+ 	mutex_lock(&led_cdev->led_access);
+ 
+@@ -49,26 +59,81 @@ ssize_t led_trigger_write(struct file *f
+ 		goto unlock;
+ 	}
+ 
+-	if (sysfs_streq(buf, "none")) {
+-		led_trigger_remove(led_cdev);
++	/* copy input and NUL-terminate; trim trailing newline if present */
++	tmp = kstrndup(buf, count, GFP_KERNEL);
++	if (!tmp) {
++		ret = -ENOMEM;
+ 		goto unlock;
+ 	}
++	if (strlen(tmp) && tmp[strlen(tmp) - 1] == '\n')
++		tmp[strlen(tmp) - 1] = '\0';
++
++	/* handle special keywords */
++	if (sysfs_streq(tmp, "none")) {
++		led_trigger_remove(led_cdev);
++		goto out_free;
++	}
++	if (sysfs_streq(tmp, "default")) {
++		led_trigger_set_default(led_cdev);
++		goto out_free;
++	}
++
++	/* split on first ':' to accept "<trigger>" or "<trigger>:<params>" */
++	pcolon = strchr(tmp, ':');
++	if (pcolon) {
++		*pcolon = '\0';
++		params = kstrdup(pcolon + 1, GFP_KERNEL);
++		if (!params) {
++			ret = -ENOMEM;
++			goto out_free;
++		}
++	}
+ 
+ 	down_read(&triggers_list_lock);
+ 	list_for_each_entry(trig, &trigger_list, next_trig) {
+-		if (sysfs_streq(buf, trig->name) && trigger_relevant(led_cdev, trig)) {
++		if (!trigger_relevant(led_cdev, trig))
++			continue;
++
++		if (sysfs_streq(tmp, trig->name)) {
+ 			down_write(&led_cdev->trigger_lock);
++
++			/* attach transient params to led_cdev before setting trigger */
++			if (params) {
++				kfree(led_cdev->params);
++				led_cdev->params = params;
++				params = NULL; /* ownership transferred */
++			} else {
++				kfree(led_cdev->params);
++				led_cdev->params = NULL;
++			}
++
++			/* set the trigger (this will call trig->activate/led_trigger_set) */
+ 			led_trigger_set(led_cdev, trig);
+ 			up_write(&led_cdev->trigger_lock);
+ 
+-			up_read(&triggers_list_lock);
+-			goto unlock;
++			found = true;
++			break;
+ 		}
+ 	}
+-	/* we come here only if buf matches no trigger */
+-	ret = -EINVAL;
+ 	up_read(&triggers_list_lock);
+ 
++	if (!found) {
++		/* no matching trigger name found */
++		ret = -EINVAL;
++		goto out_free;
++	}
++
++	/* If the trigger didn't consume the transient params, free it now. */
++	down_write(&led_cdev->trigger_lock);
++	if (led_cdev->params) {
++		kfree(led_cdev->params);
++		led_cdev->params = NULL;
++	}
++	up_write(&led_cdev->trigger_lock);
++
++out_free:
++	kfree(tmp);
++	kfree(params); /* free if not attached */
+ unlock:
+ 	mutex_unlock(&led_cdev->led_access);
+ 	return ret;
+--- a/include/linux/leds.h
++++ b/include/linux/leds.h
+@@ -246,6 +246,17 @@ struct led_classdev {
+ 
+ 	/* Ensures consistent access to the LED class device */
+ 	struct mutex		led_access;
++	/*
++	 * Optional transient parameter provided by core when user writes
++	 * "<trigger_name>:<param>" to /sys/class/leds/<led>/trigger.
++	 * - Core allocates a NUL-terminated string and stores it here before
++	 *   calling trigger->activate(led_cdev).
++	 * - Trigger may "consume" the string by freeing it and setting the
++	 *   pointer to NULL.
++	 * - If the trigger does not consume it, core frees the buffer after
++	 *   activate returns.
++	 */
++	char *params;
+ };
+ 
+ /**
