@@ -52,6 +52,11 @@ define Build/mt7622-gpt
 	rm $@.tmp
 endef
 
+define Device/dsa-migration
+  DEVICE_COMPAT_VERSION := 1.1
+  DEVICE_COMPAT_MESSAGE := Config cannot be migrated from swconfig to DSA
+endef
+
 define Device/asiarf_ap7622-wh1
   DEVICE_VENDOR := AsiaRF
   DEVICE_MODEL := AP7622-WH1
@@ -155,9 +160,11 @@ define Device/buffalo_wsr-2533dhp2
   IMAGE_SIZE := 59392k
   SUBPAGESIZE := 512
   BUFFALO_TRX_MAGIC := 0x32504844
-  DEVICE_PACKAGES := kmod-mt7615-firmware swconfig
-  DEVICE_COMPAT_VERSION := 1.1
-  DEVICE_COMPAT_MESSAGE := Partition table has been changed due to kernel size restrictions. \
+  DEVICE_PACKAGES := kmod-mt7615-firmware kmod-dsa-rtl8365mb
+  DEVICE_COMPAT_VERSION := 1.2
+  DEVICE_COMPAT_MESSAGE := Config cannot be migrated from swconfig to DSA. \
+	Additionally, it is still possible that: \
+	Partition table has been changed due to kernel size restrictions. \
 	Please upgrade via sysupgrade with factory-uboot.bin image and '-F' option. \
 	(Warning: your configurations will be erased!)
 endef
@@ -205,11 +212,12 @@ endef
 TARGET_DEVICES += dlink_eagle-pro-ai-r32-a1
 
 define Device/elecom_wrc-2533gent
+  $(Device/dsa-migration)
   DEVICE_VENDOR := Elecom
   DEVICE_MODEL := WRC-2533GENT
   DEVICE_DTS := mt7622-elecom-wrc-2533gent
   DEVICE_DTS_DIR := ../dts
-  DEVICE_PACKAGES := kmod-btmtkuart kmod-mt7615-firmware kmod-usb3 swconfig
+  DEVICE_PACKAGES := kmod-btmtkuart kmod-mt7615-firmware kmod-usb3 kmod-dsa-rtl8365mb
 endef
 TARGET_DEVICES += elecom_wrc-2533gent
 
@@ -353,11 +361,12 @@ endef
 TARGET_DEVICES += reyee_ax3200-e5
 
 define Device/totolink_a8000ru
+  $(Device/dsa-migration)
   DEVICE_VENDOR := TOTOLINK
   DEVICE_MODEL := A8000RU
   DEVICE_DTS := mt7622-totolink-a8000ru
   DEVICE_DTS_DIR := ../dts
-  DEVICE_PACKAGES := kmod-mt7615-firmware kmod-usb3 swconfig
+  DEVICE_PACKAGES := kmod-mt7615-firmware kmod-usb3 kmod-dsa-rtl8365mb
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
 endef
 TARGET_DEVICES += totolink_a8000ru
