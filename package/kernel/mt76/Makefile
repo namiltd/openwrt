@@ -6,11 +6,11 @@ PKG_RELEASE=1
 PKG_LICENSE:=BSD-3-Clause-Clear
 PKG_LICENSE_FILES:=
 
-PKG_SOURCE_URL:=https://github.com/openwrt/mt76
+PKG_SOURCE_URL:=https://github.com/OpenWRT-fanboy/mt76-firmware
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_DATE:=2026-01-28
-PKG_SOURCE_VERSION:=b2fe7f1463526572f01731db8440c10e393fd09f
-PKG_MIRROR_HASH:=ea2408d5bfa331598bd0f2fb40516ecbd718d3903a4f43ca0a2d1fc66e8fb6b6
+PKG_SOURCE_VERSION:=620f9d2afa6cd9c5b34f9ad64f82c0bee442e0db
+PKG_MIRROR_HASH:=skip
 
 PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
 PKG_USE_NINJA:=0
@@ -55,6 +55,7 @@ endef
 define KernelPackage/mt76-core
   $(KernelPackage/mt76-default)
   TITLE:=MediaTek MT76xx wireless driver
+  DEPENDS+=+TARGET_airoha_an7581:kmod-airoha-eth
   HIDDEN:=1
   FILES:=\
 	$(PKG_BUILD_DIR)/mt76.ko
