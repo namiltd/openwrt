@@ -1,0 +1,12 @@
+diff -ruN a1/drivers/crypto/inside-secure/eip93/eip93-cipher.c a2/drivers/crypto/inside-secure/eip93/eip93-cipher.c
+--- a1/drivers/crypto/inside-secure/eip93/eip93-cipher.c	2026-02-15 11:59:25.598023300 +0100
++++ a2/drivers/crypto/inside-secure/eip93/eip93-cipher.c	2026-02-15 12:01:47.903385500 +0100
+@@ -362,7 +362,7 @@
+ 		.ivsize	= 0,
+ 		.base = {
+ 			.cra_name = "ecb(des)",
+-			.cra_driver_name = "ebc(des-eip93)",
++			.cra_driver_name = "ecb(des-eip93)",
+ 			.cra_priority = EIP93_CRA_PRIORITY,
+ 			.cra_flags = CRYPTO_ALG_ASYNC |
+ 					CRYPTO_ALG_KERN_DRIVER_ONLY,
