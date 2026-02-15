@@ -1,0 +1,260 @@
+diff -ruN d0/drivers/crypto/inside-secure/eip93/eip93-aead.c d1/drivers/crypto/inside-secure/eip93/eip93-aead.c
+--- d0/drivers/crypto/inside-secure/eip93/eip93-aead.c	2026-02-15 10:42:42.617530500 +0100
++++ d1/drivers/crypto/inside-secure/eip93/eip93-aead.c	2026-02-15 10:40:11.312106200 +0100
+@@ -58,6 +58,7 @@
+ /* Crypto aead API functions */
+ static int eip93_aead_cra_init(struct crypto_tfm *tfm)
+ {
++	int ret;
+ 	struct eip93_crypto_ctx *ctx = crypto_tfm_ctx(tfm);
+ 	struct eip93_alg_template *tmpl = container_of(tfm->__crt_alg,
+ 				struct eip93_alg_template, alg.aead.base);
+@@ -71,21 +73,40 @@
+ 	ctx->set_assoc_in = true;
+ 	ctx->set_assoc_out = true;
+ 
+-	ctx->sa_record_in = kzalloc(sizeof(struct sa_record), GFP_KERNEL);
++	ctx->sa_record_in = kzalloc(sizeof(struct sa_record), GFP_KERNEL);
+ 	if (!ctx->sa_record_in)
+ 		return -ENOMEM;
+ 
+ 	ctx->sa_record_base_in = dma_map_single(ctx->eip93->dev, ctx->sa_record_in,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
++				sizeof(struct sa_record), DMA_TO_DEVICE);
+ 
+-	ctx->sa_record_out = kzalloc(sizeof(struct sa_record), GFP_KERNEL);
+-	if (!ctx->sa_record_out)
+-		return -ENOMEM;
++	ret = dma_mapping_error(ctx->eip93->dev, ctx->sa_record_base_in);
++	if (ret)
++		goto err_free_in_only;
++
++	ctx->sa_record_out = kzalloc(sizeof(struct sa_record), GFP_KERNEL);
++	if (!ctx->sa_record_out) {
++		ret = -ENOMEM;
++		goto err_unmap_in;
++	}
+ 
+ 	ctx->sa_record_base_out = dma_map_single(ctx->eip93->dev, ctx->sa_record_out,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
++				sizeof(struct sa_record), DMA_TO_DEVICE);
++
++	ret = dma_mapping_error(ctx->eip93->dev, ctx->sa_record_base_out);
++	if (ret)
++		goto err_free_out;
+ 
+ 	return 0;
++
++err_free_out:
++	kfree(ctx->sa_record_out);
++err_unmap_in:
++	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_in,
++			 sizeof(struct sa_record), DMA_TO_DEVICE);
++err_free_in_only:
++	kfree(ctx->sa_record_in);
++	return ret;
+ }
+ 
+ static void eip93_aead_cra_exit(struct crypto_tfm *tfm)
+@@ -149,11 +169,10 @@
+ 	}
+ 
+ 	ctx->blksize = crypto_aead_blocksize(ctfm);
+-	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_in,
+-			 sizeof(struct sa_record), DMA_TO_DEVICE);
+-
+-	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_out,
+-			 sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_cpu(ctx->eip93->dev, ctx->sa_record_base_in,
++				sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_cpu(ctx->eip93->dev, ctx->sa_record_base_out,
++				sizeof(struct sa_record), DMA_TO_DEVICE);
+ 	/* Encryption key */
+ 	eip93_set_sa_record(sa_record, keys.enckeylen, ctx->flags);
+ 	sa_record->sa_cmd0_word &= ~EIP93_SA_CMD_OPCODE;
+@@ -171,6 +190,8 @@
+ 	ret = eip93_hmac_setkey(ctx->flags, keys.authkey, keys.authkeylen,
+ 				ctx->authsize, sa_record->sa_i_digest,
+ 				sa_record->sa_o_digest, false);
++	if (ret)
++		return ret;
+ 
+ 	sa_record->sa_cmd0_word &= ~EIP93_SA_CMD_DIRECTION_IN;
+ 	memcpy(ctx->sa_record_in, sa_record, sizeof(struct sa_record));
+@@ -178,15 +199,15 @@
+ 	ctx->sa_record_in->sa_cmd1_word &= ~(EIP93_SA_CMD_COPY_PAD |
+ 					  EIP93_SA_CMD_COPY_DIGEST);
+ 
+-	ctx->sa_record_base_out = dma_map_single(ctx->eip93->dev, sa_record,
+-						 sizeof(struct sa_record), DMA_TO_DEVICE);
+-	ctx->sa_record_base_in = dma_map_single(ctx->eip93->dev, ctx->sa_record_in,
+-						sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_device(ctx->eip93->dev, ctx->sa_record_base_out,
++				   sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_device(ctx->eip93->dev, ctx->sa_record_base_in,
++				   sizeof(struct sa_record), DMA_TO_DEVICE);
+ 
+ 	ctx->set_assoc_in = true;
+ 	ctx->set_assoc_out = true;
+ 
+-	return ret;
++	return 0;
+ }
+ 
+ static int eip93_aead_setauthsize(struct crypto_aead *ctfm,
+@@ -194,11 +215,10 @@
+ 	struct crypto_tfm *tfm = crypto_aead_tfm(ctfm);
+ 	struct eip93_crypto_ctx *ctx = crypto_tfm_ctx(tfm);
+ 
+-	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_in,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
+-
+-	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_out,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_cpu(ctx->eip93->dev, ctx->sa_record_base_in,
++				sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_cpu(ctx->eip93->dev, ctx->sa_record_base_out,
++				sizeof(struct sa_record), DMA_TO_DEVICE);
+ 
+ 	ctx->authsize = authsize;
+ 	ctx->sa_record_in->sa_cmd0_word &= ~EIP93_SA_CMD_DIGEST_LENGTH;
+@@ -210,10 +231,10 @@
+ 	ctx->sa_record_out->sa_cmd0_word |= FIELD_PREP(EIP93_SA_CMD_DIGEST_LENGTH,
+ 						   ctx->authsize / sizeof(u32));
+ 
+-	ctx->sa_record_base_out = dma_map_single(ctx->eip93->dev, ctx->sa_record_out,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
+-	ctx->sa_record_base_in = dma_map_single(ctx->eip93->dev, ctx->sa_record_in,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_device(ctx->eip93->dev, ctx->sa_record_base_out,
++				   sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_device(ctx->eip93->dev, ctx->sa_record_base_in,
++				   sizeof(struct sa_record), DMA_TO_DEVICE);
+ 
+ 	return 0;
+ }
+@@ -222,24 +243,24 @@
+ 	struct sa_record *sa_record;
+ 
+ 	if (in) {
+-		dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_in,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
++		dma_sync_single_for_cpu(ctx->eip93->dev, ctx->sa_record_base_in,
++					sizeof(struct sa_record), DMA_TO_DEVICE);
+ 		sa_record = ctx->sa_record_in;
+ 		sa_record->sa_cmd1_word &= ~EIP93_SA_CMD_HASH_CRYPT_OFFSET;
+ 		sa_record->sa_cmd1_word |= FIELD_PREP(EIP93_SA_CMD_HASH_CRYPT_OFFSET,
+ 					      req->assoclen / sizeof(u32));
+-		ctx->sa_record_base_in = dma_map_single(ctx->eip93->dev, sa_record,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
++		dma_sync_single_for_device(ctx->eip93->dev, ctx->sa_record_base_in,
++					   sizeof(struct sa_record), DMA_TO_DEVICE);
+ 		ctx->assoclen_in = req->assoclen;
+ 	} else {
+-		dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_out,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
++		dma_sync_single_for_cpu(ctx->eip93->dev, ctx->sa_record_base_out,
++					sizeof(struct sa_record), DMA_TO_DEVICE);
+ 		sa_record = ctx->sa_record_out;
+ 		sa_record->sa_cmd1_word &= ~EIP93_SA_CMD_HASH_CRYPT_OFFSET;
+ 		sa_record->sa_cmd1_word |= FIELD_PREP(EIP93_SA_CMD_HASH_CRYPT_OFFSET,
+ 					      req->assoclen / sizeof(u32));
+-		ctx->sa_record_base_out = dma_map_single(ctx->eip93->dev, sa_record,
+-			sizeof(struct sa_record), DMA_TO_DEVICE);
++		dma_sync_single_for_device(ctx->eip93->dev, ctx->sa_record_base_out,
++					   sizeof(struct sa_record), DMA_TO_DEVICE);
+ 		ctx->assoclen_out = req->assoclen;
+ 	}
+ }
+diff -ruN d0/drivers/crypto/inside-secure/eip93/eip93-cipher.c d1/drivers/crypto/inside-secure/eip93/eip93-cipher.c
+--- d0/drivers/crypto/inside-secure/eip93/eip93-cipher.c	2026-02-15 10:52:40.573059100 +0100
++++ d1/drivers/crypto/inside-secure/eip93/eip93-cipher.c	2026-02-15 10:53:05.159575100 +0100
+@@ -56,5 +56,7 @@
+ /* Crypto skcipher API functions */
+ static int eip93_skcipher_cra_init(struct crypto_tfm *tfm)
+ {
++	int ret;
+ 	struct eip93_crypto_ctx *ctx = crypto_tfm_ctx(tfm);
+ 	struct eip93_alg_template *tmpl = container_of(tfm->__crt_alg,
+ 				struct eip93_alg_template, alg.skcipher.base);
+@@ -75,21 +77,42 @@
+ 	ctx->eip93 = tmpl->eip93;
+ 	ctx->type = tmpl->type;
+ 
+-	ctx->sa_record_in = kzalloc(sizeof(struct sa_record), GFP_KERNEL);
++	ctx->sa_record_in = kzalloc(sizeof(struct sa_record), GFP_KERNEL);
+ 	if (!ctx->sa_record_in)
+ 		return -ENOMEM;
+ 
+ 	ctx->sa_record_base_in = dma_map_single(ctx->eip93->dev, ctx->sa_record_in,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
++				sizeof(struct sa_record), DMA_TO_DEVICE);
+ 
+-	ctx->sa_record_out = kzalloc(sizeof(struct sa_record), GFP_KERNEL);
+-	if (!ctx->sa_record_out)
+-		return -ENOMEM;
++	ret = dma_mapping_error(ctx->eip93->dev, ctx->sa_record_base_in);
++	if (ret)
++		goto err_free_in_only;
++
++	ctx->sa_record_out = kzalloc(sizeof(struct sa_record), GFP_KERNEL);
++	if (!ctx->sa_record_out) {
++		ret = -ENOMEM;
++		goto err_unmap_in;
++	}
+ 
+ 	ctx->sa_record_base_out = dma_map_single(ctx->eip93->dev, ctx->sa_record_out,
+-				sizeof(struct sa_record), DMA_TO_DEVICE);
++				sizeof(struct sa_record), DMA_TO_DEVICE);
++
++	ret = dma_mapping_error(ctx->eip93->dev, ctx->sa_record_base_out);
++	if (ret)
++		goto err_free_out;
+ 
+ 	return 0;
++
++err_free_out:
++	kfree(ctx->sa_record_out);
++
++err_unmap_in:
++	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_in,
++			 sizeof(struct sa_record), DMA_TO_DEVICE);
++
++err_free_in_only:
++	kfree(ctx->sa_record_in);
++	return ret;
+ }
+ 
+ static void eip93_skcipher_cra_exit(struct crypto_tfm *tfm)
+@@ -162,11 +185,10 @@
+ 			return ret;
+ 	}
+ 
+-	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_in,
+-			 sizeof(struct sa_record), DMA_TO_DEVICE);
+-
+-	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base_out,
+-			 sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_cpu(ctx->eip93->dev, ctx->sa_record_base_out,
++				sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_cpu(ctx->eip93->dev, ctx->sa_record_base_in,
++				sizeof(struct sa_record), DMA_TO_DEVICE);
+ 
+ 	eip93_set_sa_record(sa_record, keylen, flags);
+ 
+@@ -178,11 +200,10 @@
+ 	memcpy(ctx->sa_record_in, sa_record, sizeof(struct sa_record));
+ 	ctx->sa_record_in->sa_cmd0_word |= EIP93_SA_CMD_DIRECTION_IN;
+ 
+-	ctx->sa_record_base_out = dma_map_single(ctx->eip93->dev, sa_record,
+-						 sizeof(struct sa_record), DMA_TO_DEVICE);
+-
+-	ctx->sa_record_base_in = dma_map_single(ctx->eip93->dev, ctx->sa_record_in,
+-						sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_device(ctx->eip93->dev, ctx->sa_record_base_out,
++				   sizeof(struct sa_record), DMA_TO_DEVICE);
++	dma_sync_single_for_device(ctx->eip93->dev, ctx->sa_record_base_in,
++				   sizeof(struct sa_record), DMA_TO_DEVICE);
+ 
+ 	return 0;
+ }
