@@ -1,0 +1,89 @@
+diff -ruN d6/drivers/crypto/inside-secure/eip93/eip93-common.c e0/drivers/crypto/inside-secure/eip93/eip93-common.c
+--- d6/drivers/crypto/inside-secure/eip93/eip93-common.c	2026-02-16 01:30:21.919863400 +0100
++++ e0/drivers/crypto/inside-secure/eip93/eip93-common.c	2026-02-16 10:39:54.719110200 +0100
+@@ -65,7 +65,7 @@
+ 	}
+ }
+ 
+-static void *eip93_ring_next_wptr(struct eip93_device *eip93,
++static inline void *eip93_ring_next_wptr(struct eip93_device *eip93,
+ 				  struct eip93_desc_ring *ring)
+ {
+ 	void *ptr = ring->write;
+@@ -82,7 +82,7 @@
+ 	return ptr;
+ }
+ 
+-static void *eip93_ring_next_rptr(struct eip93_device *eip93,
++static inline void *eip93_ring_next_rptr(struct eip93_device *eip93,
+ 				  struct eip93_desc_ring *ring)
+ {
+ 	void *ptr = ring->read;
+@@ -98,7 +98,7 @@
+ 	return ptr;
+ }
+ 
+-int eip93_put_descriptor(struct eip93_device *eip93,
++inline int eip93_put_descriptor(struct eip93_device *eip93,
+ 			 struct eip93_descriptor *desc)
+ {
+ 	struct eip93_descriptor *cdesc;
+@@ -127,7 +127,7 @@
+ 	return 0;
+ }
+ 
+-void *eip93_get_descriptor(struct eip93_device *eip93)
++inline void *eip93_get_descriptor(struct eip93_device *eip93)
+ {
+ 	struct eip93_descriptor *cdesc;
+ 	void *ptr;
+@@ -154,7 +154,7 @@
+ 	return ptr;
+ }
+ 
+-static void eip93_free_sg_copy(const int len, struct scatterlist **sg)
++static inline void eip93_free_sg_copy(const int len, struct scatterlist **sg)
+ {
+ 	if (!*sg || !len)
+ 		return;
+@@ -164,7 +164,7 @@
+ 	*sg = NULL;
+ }
+ 
+-static int eip93_make_sg_copy(struct scatterlist *src, struct scatterlist **dst,
++static inline int eip93_make_sg_copy(struct scatterlist *src, struct scatterlist **dst,
+ 			      const u32 len, const bool copy)
+ {
+ 	void *pages;
+@@ -191,7 +191,7 @@
+ 	return 0;
+ }
+ 
+-static bool eip93_is_sg_aligned(struct scatterlist *sg, u32 len,
++static inline bool eip93_is_sg_aligned(struct scatterlist *sg, u32 len,
+ 				const int blksize)
+ {
+ 	int nents;
+@@ -407,7 +407,7 @@
+  * Create a Descriptor for every segment to avoid copying buffers.
+  * For performance better to wait for hardware to perform multiple DMA
+  */
+-static int eip93_scatter_combine(struct eip93_device *eip93,
++static inline int eip93_scatter_combine(struct eip93_device *eip93,
+ 				 struct eip93_cipher_reqctx *rctx,
+ 				 u32 datalen, u32 split, int offsetin)
+ {
+diff -ruN d6/drivers/crypto/inside-secure/eip93/eip93-common.h e0/drivers/crypto/inside-secure/eip93/eip93-common.h
+--- d6/drivers/crypto/inside-secure/eip93/eip93-common.h	2026-02-15 10:40:51.705628200 +0100
++++ e0/drivers/crypto/inside-secure/eip93/eip93-common.h	2026-02-16 10:37:17.553734100 +0100
+@@ -9,8 +9,8 @@
+ #ifndef _EIP93_COMMON_H_
+ #define _EIP93_COMMON_H_
+ 
+-void *eip93_get_descriptor(struct eip93_device *eip93);
+-int eip93_put_descriptor(struct eip93_device *eip93, struct eip93_descriptor *desc);
++inline void *eip93_get_descriptor(struct eip93_device *eip93);
++inline int eip93_put_descriptor(struct eip93_device *eip93, struct eip93_descriptor *desc);
+ 
+ void eip93_set_sa_record(struct sa_record *sa_record, const unsigned int keylen,
+ 			 const u32 flags);
