@@ -1,0 +1,44 @@
+diff -ruN d2/drivers/crypto/inside-secure/eip93/eip93-common.c d3/drivers/crypto/inside-secure/eip93/eip93-common.c
+--- d2/drivers/crypto/inside-secure/eip93/eip93-common.c	2026-02-16 01:16:45.208398900 +0100
++++ d3/drivers/crypto/inside-secure/eip93/eip93-common.c	2026-02-16 01:27:27.775604600 +0100
+@@ -123,16 +123,25 @@
+ {
+ 	struct eip93_descriptor *cdesc;
+ 	void *ptr;
++	unsigned long irqflags;
++
++	spin_lock_irqsave(&eip93->ring->read_lock, irqflags);
+ 
+ 	cdesc = eip93_ring_next_rptr(eip93, &eip93->ring->cdr);
+-	if (IS_ERR(cdesc))
++	if (IS_ERR(cdesc)) {
++		spin_unlock_irqrestore(&eip93->ring->read_lock, irqflags);
+ 		return ERR_PTR(-ENOENT);
++	}
+ 
+ 	memset(cdesc, 0, sizeof(struct eip93_descriptor));
+ 
+ 	ptr = eip93_ring_next_rptr(eip93, &eip93->ring->rdr);
+-	if (IS_ERR(ptr))
++	if (IS_ERR(ptr)) {
++		spin_unlock_irqrestore(&eip93->ring->read_lock, irqflags);
+ 		return ERR_PTR(-ENOENT);
++	}
++
++	spin_unlock_irqrestore(&eip93->ring->read_lock, irqflags);
+ 
+ 	return ptr;
+ }
+diff -ruN d2/drivers/crypto/inside-secure/eip93/eip93-main.c d3/drivers/crypto/inside-secure/eip93/eip93-main.c
+--- d2/drivers/crypto/inside-secure/eip93/eip93-main.c	2026-02-15 10:40:17.157221500 +0100
++++ d3/drivers/crypto/inside-secure/eip93/eip93-main.c	2026-02-16 01:23:21.151897700 +0100
+@@ -207,8 +207,7 @@
+ 	last_entry = false;
+ 
+ 	while (left) {
+-		scoped_guard(spinlock_irqsave, &eip93->ring->read_lock)
+-			rdesc = eip93_get_descriptor(eip93);
++		rdesc = eip93_get_descriptor(eip93);
+ 		if (IS_ERR(rdesc)) {
+ 			dev_err(eip93->dev, "Ndesc: %d nreq: %d\n",
+ 				handled, left);
