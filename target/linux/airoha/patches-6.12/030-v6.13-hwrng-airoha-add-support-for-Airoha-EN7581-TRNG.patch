@@ -26,8 +26,10 @@ Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
  3 files changed, 257 insertions(+)
  create mode 100644 drivers/char/hw_random/airoha-trng.c
 
---- a/drivers/char/hw_random/Kconfig
-+++ b/drivers/char/hw_random/Kconfig
+Index: linux-6.12.63/drivers/char/hw_random/Kconfig
+===================================================================
+--- linux-6.12.63.orig/drivers/char/hw_random/Kconfig
++++ linux-6.12.63/drivers/char/hw_random/Kconfig
 @@ -62,6 +62,19 @@ config HW_RANDOM_AMD
  
  	  If unsure, say Y.
@@ -48,8 +50,10 @@ Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
  config HW_RANDOM_ATMEL
  	tristate "Atmel Random Number Generator support"
  	depends on (ARCH_AT91 || COMPILE_TEST)
---- a/drivers/char/hw_random/Makefile
-+++ b/drivers/char/hw_random/Makefile
+Index: linux-6.12.63/drivers/char/hw_random/Makefile
+===================================================================
+--- linux-6.12.63.orig/drivers/char/hw_random/Makefile
++++ linux-6.12.63/drivers/char/hw_random/Makefile
 @@ -8,6 +8,7 @@ rng-core-y := core.o
  obj-$(CONFIG_HW_RANDOM_TIMERIOMEM) += timeriomem-rng.o
  obj-$(CONFIG_HW_RANDOM_INTEL) += intel-rng.o
@@ -58,9 +62,11 @@ Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
  obj-$(CONFIG_HW_RANDOM_ATMEL) += atmel-rng.o
  obj-$(CONFIG_HW_RANDOM_BA431) += ba431-rng.o
  obj-$(CONFIG_HW_RANDOM_GEODE) += geode-rng.o
+Index: linux-6.12.63/drivers/char/hw_random/airoha-trng.c
+===================================================================
 --- /dev/null
-+++ b/drivers/char/hw_random/airoha-trng.c
-@@ -0,0 +1,243 @@
++++ linux-6.12.63/drivers/char/hw_random/airoha-trng.c
+@@ -0,0 +1,247 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/* Copyright (C) 2024 Christian Marangi */
 +
@@ -99,8 +105,12 @@ Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
 +#define   RST_STARTUP_AP_TEST_FAIL	BIT(17)
 +#define   RST_STARTUP_RC_TEST_FAIL	BIT(16)
 +#define   RAW_DATA_VALID		BIT(7)
++#define TRNG_TEST_MODE_SHA_DONE		0x838
++#define   DATA_RDY					BIT(31)
++
 +
 +#define TRNG_RAW_DATA_OUT		0x828
++#define TRNG_DATA_OUT			0x83C
 +
 +#define TRNG_CNT_TRANS_VALID		0x80
 +#define BUSY_LOOP_SLEEP			10
@@ -205,14 +215,14 @@ Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
 +	u32 status;
 +	int ret;
 +
-+	ret = readl_poll_timeout(trng->base + TRNG_HEALTH_TEST_STATUS, status,
-+				 status & RAW_DATA_VALID, 10, 1000);
++	ret = readl_poll_timeout(trng->base + TRNG_TEST_MODE_SHA_DONE, status,
++				 status & DATA_RDY, 10, 1000);
 +	if (ret < 0) {
 +		dev_err(trng->dev, "Timeout waiting for TRNG RAW Data valid\n");
 +		return ret;
 +	}
 +
-+	*data = readl(trng->base + TRNG_RAW_DATA_OUT);
++	*data = readl(trng->base + TRNG_DATA_OUT);
 +
 +	return 4;
 +}
@@ -263,9 +273,9 @@ Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
 +	writel(val, trng->base + TRNG_INTR_EN);
 +
 +	/* Set output to raw data */
-+	val = readl(trng->base + TRNG_NS_SEK_AND_DAT_EN);
-+	val |= RAW_DATA_EN;
-+	writel(val, trng->base + TRNG_NS_SEK_AND_DAT_EN);
++	// val = readl(trng->base + TRNG_NS_SEK_AND_DAT_EN);
++	// val |= RAW_DATA_EN;
++	// writel(val, trng->base + TRNG_NS_SEK_AND_DAT_EN);
 +
 +	/* Put it in SW Reset */
 +	writel(SW_RST, trng->base + TRNG_HEALTH_TEST_SW_RST);
