@@ -1,0 +1,47 @@
+From 07cf060d06a898749f321c8e95e92935c03ea8f3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Alvin=20=C5=A0ipraga?= <alsi@bang-olufsen.dk>
+Date: Wed, 23 Feb 2022 00:41:51 +0100
+Subject: [PATCH 04/12] net: dsa: realtek: rtl8365mb: set STP state to disabled
+ early
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since we are going around and manipulating a number of port settings
+during setup, it's safer to assume that the port is disabled to begin
+with. This is purely defensive.
+
+Signed-off-by: Alvin Šipraga <alsi@bang-olufsen.dk>
+Signed-off-by: Luiz Angelo Daros de Luca <luizluca@gmail.com>
+---
+ drivers/net/dsa/realtek/rtl8365mb.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+--- a/drivers/net/dsa/realtek/rtl8365mb.c
++++ b/drivers/net/dsa/realtek/rtl8365mb.c
+@@ -2486,6 +2486,12 @@ static int rtl8365mb_setup(struct dsa_sw
+ 		if (dsa_is_unused_port(ds, i))
+ 			continue;
+ 
++		/* Set the initial STP state of all ports to DISABLED, otherwise
++		 * ports will still forward frames to the CPU despite being
++		 * administratively down by default.
++		 */
++		rtl8365mb_port_stp_state_set(ds, i, BR_STATE_DISABLED);
++
+ 		/* Forward only to the CPU */
+ 		ret = rtl8365mb_port_set_isolation(priv, i, cpu->mask);
+ 		if (ret)
+@@ -2496,12 +2502,6 @@ static int rtl8365mb_setup(struct dsa_sw
+ 		if (ret)
+ 			goto out_teardown_irq;
+ 
+-		/* Set the initial STP state of all ports to DISABLED, otherwise
+-		 * ports will still forward frames to the CPU despite being
+-		 * administratively down by default.
+-		 */
+-		rtl8365mb_port_stp_state_set(ds, i, BR_STATE_DISABLED);
+-
+ 		/* Set up per-port private data */
+ 		p->priv = priv;
+ 		p->index = i;
