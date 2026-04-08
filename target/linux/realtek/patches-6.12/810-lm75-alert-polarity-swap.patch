@@ -44,7 +44,7 @@ Signed-off-by: Markus Stockhausen <markus.stockhausen@gmx.de>
  	}
  	data->orig_conf = status;
  	data->current_conf = status;
-+	
++
 +	set_mask = data->params->set_mask;
 +	if (of_property_read_bool(dev->of_node, "alert-polarity-active-high")) {
 +		pr_info("set lm75 alert to active high\n");

@@ -100,7 +100,7 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
  	help
  	  Enables support for the Cirrus Logic timer block
  	  EP93XX.
-+ 
++
 +config CEVT_SYSTICK_QUIRK
 +	bool
 +	default n
