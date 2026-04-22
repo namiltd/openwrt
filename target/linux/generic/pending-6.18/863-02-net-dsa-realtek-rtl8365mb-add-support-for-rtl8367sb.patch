@@ -1,0 +1,38 @@
+From: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+Date: Wed, 22 Apr 2026 17:38:32 +0200
+Subject: [PATCH] net: dsa: realtek: rtl8365mb: add support for RTL8367SB
+
+Add chip info entry for the Realtek RTL8367SB switch. This device has
+chip ID 0x6367 and version 0x0010. It exposes two external interfaces:
+port 6 supports MII, TMII, RMII, RGMII, SGMII and HSGMII, while port 7
+supports MII, TMII, RMII and RGMII. Use the existing 8365MB-VC jam table
+for initialization.
+
+Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+---
+ drivers/net/dsa/realtek/rtl8365mb_main.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -731,6 +731,20 @@ static const struct rtl8365mb_chip_info
+ 		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
+ 	},
+ 	{
++		.name = "RTL8367SB",
++		.chip_id = 0x6367,
++		.chip_ver = 0x0010,
++		.extints = {
++			{ 6, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
++				PHY_INTF(RMII) | PHY_INTF(RGMII) |
++				PHY_INTF(SGMII) | PHY_INTF(HSGMII) },
++			{ 7, 2, PHY_INTF(MII) | PHY_INTF(TMII) |
++				PHY_INTF(RMII) | PHY_INTF(RGMII) },
++		},
++		.jam_table = rtl8365mb_init_jam_8365mb_vc,
++		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
++	},
++	{
+ 		.name = "RTL8367RB-VB",
+ 		.chip_id = 0x6367,
+ 		.chip_ver = 0x0020,
