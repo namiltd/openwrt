@@ -18,6 +18,7 @@ mediatek_setup_interfaces()
 	netis,nx31|\
 	nokia,ea0326gmp|\
 	mercusys,mr80x-v3|\
+	mercusys,mr85x-dsa|\
 	routerich,ax3000-v1|\
 	zbtlink,zbt-z8103ax|\
 	zbtlink,zbt-z8103ax-c)
