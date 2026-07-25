@@ -1,0 +1,98 @@
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Subject: [PATCH] net: dsa: realtek: restore opt-in RTL8367S GPL init
+
+Apply the GPL-derived RTL8367S-VB initialization table only for the explicitly selected RTL8367D 802.1Q path.
+
+The register table is copied from rtl8367c_initvals in OpenWrt's GPL-2.0
+rtl8367b driver. It was introduced by the RTL8367C/S support commit with
+contributions from Serge Vasilugin, DENG Qingfang, Chuanhong Guo, Gaspare
+Bruno and Mieczyslaw Nalewaj:
+
+Link: https://github.com/openwrt/openwrt/blob/main/target/linux/generic/files/drivers/net/phy/rtl8367b.c
+Link: https://github.com/openwrt/openwrt/commit/4b81eda3c1a9b9ef32640df9402e3650fb48d98b
+
+[Fabiano: port the table to rtl8365mb and gate it behind the MR80X
+RTL8367D device-tree opt-in.]
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+
+diff --git a/drivers/net/dsa/realtek/rtl8365mb_main.c b/drivers/net/dsa/realtek/rtl8365mb_main.c
+index 6e670b3..15afce6 100644
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -2718,6 +2718,44 @@ static int rtl8365mb_change_tag_protocol(struct dsa_switch *ds,
+ 	return rtl8365mb_cpu_config(priv);
+ }
+ 
++/* GPL register table from drivers/net/phy/rtl8367b.c (RTL8367S-VB). */
++static const struct rtl8365mb_jam_tbl_entry rtl8367d_init_jam[] = {
++	{ 0x13c2, 0x0000 }, { 0x0018, 0x0f00 }, { 0x0038, 0x0f00 },
++	{ 0x0058, 0x0f00 }, { 0x0078, 0x0f00 }, { 0x0098, 0x0f00 },
++	{ 0x1d15, 0x0a69 }, { 0x2000, 0x1340 }, { 0x2020, 0x1340 },
++	{ 0x2040, 0x1340 }, { 0x2060, 0x1340 }, { 0x2080, 0x1340 },
++	{ 0x13eb, 0x15bb }, { 0x1303, 0x06d6 }, { 0x1304, 0x0700 },
++	{ 0x13e2, 0x003f }, { 0x13f9, 0x0090 }, { 0x121e, 0x03ca },
++	{ 0x1233, 0x0352 }, { 0x1237, 0x00a0 }, { 0x123a, 0x0030 },
++	{ 0x1239, 0x0084 }, { 0x0301, 0x1000 }, { 0x1349, 0x001f },
++	{ 0x18e0, 0x4004 }, { 0x122b, 0x641c }, { 0x1305, 0xc000 },
++	{ 0x1200, 0x7fcb }, { 0x0884, 0x0003 }, { 0x06eb, 0x0001 },
++	{ 0x00cf, 0xffff }, { 0x00d0, 0x0007 }, { 0x00ce, 0x48b0 },
++	{ 0x00ce, 0x48b0 }, { 0x0398, 0xffff }, { 0x0399, 0x0007 },
++	{ 0x0300, 0x0001 }, { 0x03fa, 0x0007 }, { 0x08c8, 0x00c0 },
++	{ 0x0a30, 0x020e }, { 0x0800, 0x0000 }, { 0x0802, 0x0000 },
++	{ 0x09da, 0x0017 }, { 0x1d32, 0x0002 },
++};
++
++static int rtl8367d_write_init_jam(struct realtek_priv *priv)
++{
++	int ret;
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(rtl8367d_init_jam); i++) {
++		ret = regmap_write(priv->map, rtl8367d_init_jam[i].reg,
++				   rtl8367d_init_jam[i].val);
++		if (ret)
++			return ret;
++	}
++
++	dev_info(priv->dev,
++		 "RTL8367S-VB: GPL init table applied (%zu entries)\n",
++		 ARRAY_SIZE(rtl8367d_init_jam));
++
++	return 0;
++}
++
+ static int rtl8365mb_switch_init(struct realtek_priv *priv)
+ {
+ 	struct rtl8365mb *mb = priv->chip_data;
+@@ -2727,8 +2765,14 @@ static int rtl8365mb_switch_init(struct realtek_priv *priv)
+ 
+ 	ci = mb->chip_info;
+ 
++	if (rtl8367s_vb_use_8021q_tagging(priv)) {
++		ret = rtl8367d_write_init_jam(priv);
++		if (ret)
++			return ret;
++	}
++
+ 	/* Do any chip-specific init jam before getting to the common stuff */
+-	if (ci->jam_table) {
++	if (ci->chip_id != RTL8367S_VB_CHIP_ID && ci->jam_table) {
+ 		for (i = 0; i < ci->jam_size; i++) {
+ 			ret = regmap_write(priv->map, ci->jam_table[i].reg,
+ 					   ci->jam_table[i].val);
+@@ -2745,6 +2789,14 @@ static int rtl8365mb_switch_init(struct realtek_priv *priv)
+ 			return ret;
+ 	}
+ 
++	if (mb->chip_info->chip_id == RTL8367S_VB_CHIP_ID &&
++	    fwnode_property_present(dev_fwnode(priv->dev),
++				    "realtek,rtl8367d-nctrl-firmware")) {
++		ret = rtl8367d_load_nctrl_firmware(priv);
++		if (ret)
++			return ret;
++	}
++
+ 	return 0;
+ }
+ 
