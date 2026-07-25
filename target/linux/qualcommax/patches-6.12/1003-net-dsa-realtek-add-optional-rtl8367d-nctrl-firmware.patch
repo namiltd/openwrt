@@ -1,0 +1,121 @@
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Subject: [PATCH] net: dsa: realtek: add optional RTL8367D NCtrl firmware
+
+Keep the legacy NCtrl loader available behind its dedicated firmware property. The MR80X DTS does not enable this optional path.
+
+The controller registers and loading sequence are derived from the Realtek
+RTL8367D SDK distributed in the Mercusys MR80X GPL source release. The
+kernel-side firmware loader and device-tree opt-in were implemented by
+Fabiano Tassotti. The vendor controller binary remains external and is not
+included by this patch.
+
+Source: Mercusys MR80X V5 GPL source release, Realtek RTL8367D SDK
+Link: https://www.mercusys.com/en/support/gpl-code/
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+
+diff --git a/drivers/net/dsa/realtek/rtl8365mb_main.c b/drivers/net/dsa/realtek/rtl8365mb_main.c
+index 15afce6..3dfd1de 100644
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -93,6 +93,7 @@
+ #include <linux/bitfield.h>
+ #include <linux/dsa/8021q.h>
+ #include <linux/bitops.h>
++#include <linux/firmware.h>
+ #include <linux/interrupt.h>
+ #include <linux/irqdomain.h>
+ #include <linux/mutex.h>
+@@ -250,6 +251,18 @@
+ #define RTL8367S_VB_CHIP_ID				0x6642
+ #define RTL8367S_VB_CHIP_VER				0x0010
+ #define RTL8367S_VB_EXT_PORT0				6
++#define RTL8367D_NCTRL_FIRMWARE				"rtl8367d-nctrl.bin"
++#define RTL8367D_NCTRL_SIZE				1545
++#define RTL8367D_NCTRL_BASE				0xe000
++#define RTL8367D_BYPASS_ABILITY_LOCK_REG			0x134a
++#define RTL8367D_BYPASS_PHY_MASK			0x00f8
++#define RTL8367D_MISC_CONFIG0_REG			0x130c
++#define RTL8367D_DW8051_ENABLE				BIT(5)
++#define RTL8367D_DW8051_READY_REG			0x1336
++#define RTL8367D_IROM_MSB_MASK				GENMASK(3, 2)
++#define RTL8367D_IROM_ACCESS_ENABLE			BIT(1)
++#define RTL8367D_DW8051_RESET_REG			0x1322
++#define RTL8367D_DW8051_RESET				BIT(4)
+ 
+ static bool rtl8367s_8021q_cpu_aware;
+ module_param_named(cpu_aware, rtl8367s_8021q_cpu_aware, bool, 0644);
+@@ -2756,6 +2769,73 @@ static int rtl8367d_write_init_jam(struct realtek_priv *priv)
+ 	return 0;
+ }
+ 
++static int rtl8367d_load_nctrl_firmware(struct realtek_priv *priv)
++{
++	const struct firmware *fw;
++	int ret;
++	int i;
++
++	ret = request_firmware_direct(&fw, RTL8367D_NCTRL_FIRMWARE, priv->dev);
++	if (ret) {
++		dev_err(priv->dev, "failed to load %s: %pe\n",
++			RTL8367D_NCTRL_FIRMWARE, ERR_PTR(ret));
++		return ret;
++	}
++
++	if (fw->size != RTL8367D_NCTRL_SIZE) {
++		dev_err(priv->dev, "%s has invalid size %zu, expected %u\n",
++			RTL8367D_NCTRL_FIRMWARE, fw->size,
++			RTL8367D_NCTRL_SIZE);
++		ret = -EINVAL;
++		goto out_release;
++	}
++
++	ret = regmap_update_bits(priv->map, RTL8367D_BYPASS_ABILITY_LOCK_REG,
++				 RTL8367D_BYPASS_PHY_MASK,
++				 RTL8367D_BYPASS_PHY_MASK);
++	if (ret)
++		goto out_release;
++
++	ret = regmap_update_bits(priv->map, RTL8367D_DW8051_RESET_REG,
++				 RTL8367D_DW8051_RESET,
++				 RTL8367D_DW8051_RESET);
++	if (ret)
++		goto out_release;
++	ret = regmap_update_bits(priv->map, RTL8367D_MISC_CONFIG0_REG,
++				 RTL8367D_DW8051_ENABLE,
++				 RTL8367D_DW8051_ENABLE);
++	if (ret)
++		goto out_release;
++	ret = regmap_update_bits(priv->map, RTL8367D_DW8051_READY_REG,
++				 RTL8367D_IROM_ACCESS_ENABLE |
++				 RTL8367D_IROM_MSB_MASK,
++				 RTL8367D_IROM_ACCESS_ENABLE);
++	if (ret)
++		goto out_release;
++
++	for (i = 0; i < fw->size; i++) {
++		ret = regmap_write(priv->map, RTL8367D_NCTRL_BASE + i,
++				   fw->data[i]);
++		if (ret)
++			goto out_release;
++	}
++
++	ret = regmap_update_bits(priv->map, RTL8367D_DW8051_READY_REG,
++				 RTL8367D_IROM_ACCESS_ENABLE |
++				 RTL8367D_IROM_MSB_MASK, 0);
++	if (ret)
++		goto out_release;
++	ret = regmap_update_bits(priv->map, RTL8367D_DW8051_RESET_REG,
++				 RTL8367D_DW8051_RESET, 0);
++	if (!ret)
++		dev_info(priv->dev, "RTL8367D NCtrl firmware loaded (%zu bytes)\n",
++			 fw->size);
++
++out_release:
++	release_firmware(fw);
++	return ret;
++}
++
+ static int rtl8365mb_switch_init(struct realtek_priv *priv)
+ {
+ 	struct rtl8365mb *mb = priv->chip_data;
