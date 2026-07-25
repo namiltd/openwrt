@@ -6,7 +6,9 @@
  */
 
 #include <linux/clk.h>
+#include <linux/io.h>
 #include <linux/of_mdio.h>
+#include <linux/property.h>
 #include <linux/pcs/pcs.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
@@ -18,6 +20,7 @@
 #define MAX_FRAME_SIZE	16383	/* 14 bits */
 /* MAX_MTU = (MAX_FRAME_SIZE - ETH_HLEN - ETH_FCS_LEN - (2 * VLAN_HLEN)) */
 #define MAX_MTU		16357
+#define IPQ5018_GMAC_FLOW_CTRL_REG	0x18
 
 static struct clk_bulk_data ipq5018_gmac_clks[] = {
 	{ .id = "stmmaceth" },
@@ -31,8 +34,11 @@ static struct clk_bulk_data ipq5018_gmac_clks[] = {
 
 struct ipq5018_gmac {
 	struct device *dev;
+	void __iomem *mac_base;
 	struct clk *rx_clk;
 	struct clk *tx_clk;
+	u32 flow_control;
+	bool has_flow_control;
 };
 
 static void ipq5018_gmac_fix_speed(void *priv, unsigned int speed, unsigned int mode)
@@ -61,6 +67,13 @@ static void ipq5018_gmac_fix_speed(void *priv, unsigned int speed, unsigned int 
 
 	clk_set_rate(gmac->rx_clk, rate);
 	clk_set_rate(gmac->tx_clk, rate);
+
+	/* Keep the legacy IPQ GMAC flow-control register board-selectable.
+	 * Boards that do not declare the property retain stmmac defaults.
+	 */
+	if (gmac->has_flow_control)
+		iowrite32(gmac->flow_control,
+			   gmac->mac_base + IPQ5018_GMAC_FLOW_CTRL_REG);
 }
 
 static int ipq5018_gmac_pcs_init(struct stmmac_priv *priv)
@@ -146,6 +159,10 @@ static int ipq5018_gmac_probe(struct platform_device *pdev)
 				     "failed to allocate priv\n");
 
 	gmac->dev = dev;
+	gmac->mac_base = stmmac_res.addr;
+	gmac->has_flow_control = !device_property_read_u32(dev,
+							   "qcom,gmac-flow-control",
+							   &gmac->flow_control);
 
 	gmac->rx_clk = devm_clk_get(dev, "rx");
 	if (IS_ERR(gmac->rx_clk))
