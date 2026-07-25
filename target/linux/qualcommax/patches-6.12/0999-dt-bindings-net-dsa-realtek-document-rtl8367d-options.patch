@@ -1,0 +1,66 @@
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Subject: [PATCH] dt-bindings: net: dsa: document RTL8367D options
+
+Document the opt-in RTL8367D properties. Boards without these properties retain the standard rtl8365mb behavior.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+
+diff --git a/Documentation/devicetree/bindings/net/dsa/realtek.yaml b/Documentation/devicetree/bindings/net/dsa/realtek.yaml
+index 70b6bda..eb2b259 100644
+--- a/Documentation/devicetree/bindings/net/dsa/realtek.yaml
++++ b/Documentation/devicetree/bindings/net/dsa/realtek.yaml
+@@ -59,6 +59,54 @@ properties:
+     description: GPIO to be used to reset the whole device
+     maxItems: 1
+ 
++  realtek,rtl8367d-8021q-tagging:
++    type: boolean
++    description:
++      Select the VSC73XX 802.1Q DSA tagger for an RTL8367D-compatible
++      switch. Without this property the native Realtek tagger is used.
++
++  realtek,rtl8367d-ingress-filter:
++    type: boolean
++    description:
++      Enable VLAN ingress membership filtering in the RTL8367D 802.1Q
++      datapath.
++
++  realtek,rtl8367d-standalone-vlan-uppers:
++    type: boolean
++    description:
++      Permit standalone user ports to receive VLAN-tagged traffic through
++      VLAN upper devices while retaining ingress filtering in VLAN-aware bridges.
++
++  realtek,rtl8367d-transparent:
++    type: boolean
++    description:
++      Enable transparent VLAN forwarding in the RTL8367D 802.1Q datapath.
++
++  realtek,rtl8367d-no-wan-ingress-filter:
++    type: boolean
++    description:
++      Disable VLAN ingress membership filtering on the designated WAN port.
++
++  realtek,rtl8367d-cpu-aware:
++    type: boolean
++    description:
++      Keep the CPU port in the RTL8367D CPU-aware port mask while using the
++      802.1Q datapath.
++
++  realtek,rtl8367d-egress-mode:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    minimum: 0
++    maximum: 3
++    description:
++      RTL8367D VLAN egress mode used by the 802.1Q datapath.
++
++  realtek,rtl8367d-wan-port:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    minimum: 0
++    maximum: 10
++    description:
++      Physical port that needs the WAN-specific ingress-filter policy.
++
+   resets:
+     maxItems: 1
+ 
