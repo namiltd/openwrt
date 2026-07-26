@@ -43,7 +43,7 @@ Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
  /* CPU port mask register - controls which ports are treated as CPU ports */
  #define RTL8365MB_CPU_PORT_MASK_REG	0x1219
  #define   RTL8365MB_CPU_PORT_MASK_MASK	0x07FF
-@@ -1584,21 +1601,29 @@ static int rtl8365mb_ext_config_forcemod
+@@ -1583,21 +1600,29 @@ static int rtl8365mb_ext_config_forcemod
  	u32 r_link;
  	int val;
  	int ret;
@@ -78,7 +78,7 @@ Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
  			r_speed = RTL8365MB_PORT_SPEED_1000M;
  		} else if (speed == SPEED_100) {
  			r_speed = RTL8365MB_PORT_SPEED_100M;
-@@ -1628,8 +1653,7 @@ static int rtl8365mb_ext_config_forcemod
+@@ -1627,8 +1652,7 @@ static int rtl8365mb_ext_config_forcemod
  		r_duplex = 0;
  	}
  
@@ -88,7 +88,7 @@ Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
  			 r_tx_pause) |
  	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_RXPAUSE_MASK,
  			 r_rx_pause) |
-@@ -1637,11 +1661,30 @@ static int rtl8365mb_ext_config_forcemod
+@@ -1636,11 +1660,30 @@ static int rtl8365mb_ext_config_forcemod
  	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_DUPLEX_MASK,
  			 r_duplex) |
  	      FIELD_PREP(RTL8365MB_DIGITAL_INTERFACE_FORCE_SPEED_MASK, r_speed);
