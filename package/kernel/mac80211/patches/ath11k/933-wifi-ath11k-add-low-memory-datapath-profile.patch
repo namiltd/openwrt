@@ -1,0 +1,107 @@
+From 8f96d642a7b84fdba0b649ef1fecc960ac17ab89 Mon Sep 17 00:00:00 2001
+From: Fabiano <fbinerd@users.noreply.github.com>
+Date: Sat, 25 Jul 2026 23:55:00 -0300
+Subject: [PATCH] wifi: ath11k: add an opt-in low-memory datapath profile
+
+ath11k allocates 4096-entry primary and monitor buffer rings for every
+radio. Since every entry is backed by an SKB, these rings leave too
+little runtime headroom on systems with 256 MiB of RAM and two radios.
+
+Allow memory-constrained boards to select smaller buffer rings through
+the qcom,ath11k-low-memory-datapath property. Keep 1024 entries in the
+primary RX ring and use the same monitor buffer and destination ring
+sizes as the upstream ath12k low-memory profile.
+
+Keep the existing sizes as the unconditional default so platforms that
+do not opt in retain identical datapath behavior.
+
+Signed-off-by: Fabiano <fbinerd@users.noreply.github.com>
+---
+ drivers/net/wireless/ath/ath11k/core.c  |  5 +++++
+ drivers/net/wireless/ath/ath11k/dp.h    |  3 +++
+ drivers/net/wireless/ath/ath11k/dp_rx.c | 12 ++++++++++--
+ drivers/net/wireless/ath/ath11k/hw.h    |  1 +
+ 4 files changed, 21 insertions(+), 3 deletions(-)
+
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -2637,6 +2637,11 @@ static int ath11k_init_hw_params(struct
+ 
+ 	ab->hw_params = *hw_params;
+ 
++	ab->hw_params.low_memory_datapath =
++		of_property_read_bool(ab->dev->of_node,
++				      "qcom,ath11k-low-memory-datapath");
++	if (ab->hw_params.low_memory_datapath)
++		ath11k_info(ab, "using low-memory datapath profile\n");
+ 	ret = of_property_read_u32(ab->dev->of_node,
+ 				   "qcom,ath11k-fw-memory-mode",
+ 				   &fw_mem_mode);
+--- a/drivers/net/wireless/ath/ath11k/dp.h
++++ b/drivers/net/wireless/ath/ath11k/dp.h
+@@ -218,12 +218,15 @@ struct ath11k_pdev_dp {
+ #define DP_REO_EXCEPTION_RING_SIZE	128
+ #define DP_REO_CMD_RING_SIZE		256
+ #define DP_REO_STATUS_RING_SIZE		2048
+ #define DP_RXDMA_BUF_RING_SIZE		4096
++#define DP_RXDMA_BUF_RING_SIZE_LOW_MEMORY	1024
+ #define DP_RXDMA_REFILL_RING_SIZE	2048
+ #define DP_RXDMA_ERR_DST_RING_SIZE	1024
+ #define DP_RXDMA_MON_STATUS_RING_SIZE	1024
+ #define DP_RXDMA_MONITOR_BUF_RING_SIZE	4096
++#define DP_RXDMA_MONITOR_BUF_RING_SIZE_LOW_MEMORY	256
+ #define DP_RXDMA_MONITOR_DST_RING_SIZE	2048
++#define DP_RXDMA_MONITOR_DST_RING_SIZE_LOW_MEMORY	512
+ #define DP_RXDMA_MONITOR_DESC_RING_SIZE	4096
+ 
+ #define DP_RX_RELEASE_RING_NUM	3
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -572,10 +572,19 @@ static int ath11k_dp_rx_pdev_srng_alloc(
+ 	struct dp_srng *srng = NULL;
+ 	int i;
+ 	int ret;
++	u32 rx_buf_ring_size = DP_RXDMA_BUF_RING_SIZE;
++	u32 monitor_buf_ring_size = DP_RXDMA_MONITOR_BUF_RING_SIZE;
++	u32 monitor_dst_ring_size = DP_RXDMA_MONITOR_DST_RING_SIZE;
++
++	if (ab->hw_params.low_memory_datapath) {
++		rx_buf_ring_size = DP_RXDMA_BUF_RING_SIZE_LOW_MEMORY;
++		monitor_buf_ring_size = DP_RXDMA_MONITOR_BUF_RING_SIZE_LOW_MEMORY;
++		monitor_dst_ring_size = DP_RXDMA_MONITOR_DST_RING_SIZE_LOW_MEMORY;
++	}
+ 
+ 	ret = ath11k_dp_srng_setup(ar->ab,
+ 				   &dp->rx_refill_buf_ring.refill_buf_ring,
+ 				   HAL_RXDMA_BUF, 0,
+-				   dp->mac_id, DP_RXDMA_BUF_RING_SIZE);
++				   dp->mac_id, rx_buf_ring_size);
+ 	if (ret) {
+ 		ath11k_warn(ar->ab, "failed to setup rx_refill_buf_ring\n");
+@@ -636,7 +644,7 @@ static int ath11k_dp_rx_pdev_srng_alloc(
+ 	ret = ath11k_dp_srng_setup(ar->ab,
+ 				   &dp->rxdma_mon_buf_ring.refill_buf_ring,
+ 				   HAL_RXDMA_MONITOR_BUF, 0, dp->mac_id,
+-				   DP_RXDMA_MONITOR_BUF_RING_SIZE);
++				   monitor_buf_ring_size);
+ 	if (ret) {
+ 		ath11k_warn(ar->ab,
+ 			    "failed to setup HAL_RXDMA_MONITOR_BUF\n");
+@@ -645,7 +653,7 @@ static int ath11k_dp_rx_pdev_srng_alloc(
+ 
+ 	ret = ath11k_dp_srng_setup(ar->ab, &dp->rxdma_mon_dst_ring,
+ 				   HAL_RXDMA_MONITOR_DST, 0, dp->mac_id,
+-				   DP_RXDMA_MONITOR_DST_RING_SIZE);
++				   monitor_dst_ring_size);
+ 	if (ret) {
+ 		ath11k_warn(ar->ab,
+ 			    "failed to setup HAL_RXDMA_MONITOR_DST\n");
+--- a/drivers/net/wireless/ath/ath11k/hw.h
++++ b/drivers/net/wireless/ath/ath11k/hw.h
+@@ -231,6 +231,7 @@ struct ath11k_hw_params {
+ 	bool support_dual_stations;
+ 	bool pdev_suspend;
++	bool low_memory_datapath;
+ };
+ 
+ struct ath11k_hw_ops {
