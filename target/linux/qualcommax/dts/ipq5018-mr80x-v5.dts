@@ -422,6 +422,10 @@
 	};
 };
 
+&q6_region {
+	reg = <0x0 0x4b000000 0x0 0x2e00000>;
+};
+
 &q6v5_wcss {
 	status = "okay";
 
@@ -435,6 +439,7 @@
 	qcom,userpd-subsys-name = "q6v5_wcss_userpd1";
 	qcom,ath11k-calibration-variant = "Mercusys-MR80X-v5";
 	qcom,ath11k-fw-memory-mode = <2>;
+	qcom,ath11k-low-memory-datapath;
 	qcom,ath11k-calibration-needs-macflag;
 	qcom,bdf-addr = <0x4c400000>;
 	nvmem-cell-names = "mac-address", "calibration";
@@ -448,9 +453,9 @@
 	qcom,userpd-subsys-name = "q6v5_wcss_userpd2";
 	qcom,ath11k-calibration-variant = "Mercusys-MR80X-v5";
 	qcom,ath11k-fw-memory-mode = <2>;
+	qcom,ath11k-low-memory-datapath;
 	qcom,ath11k-calibration-needs-macflag;
 	qcom,bdf-addr = <0x4d100000>;
-	qcom,m3-dump-addr = <0x4df00000>;
 	nvmem-cell-names = "mac-address", "calibration";
 	nvmem-cells = <&macaddr_tp_data_2d5030 5>, <&cal_art_26800>;
 };
