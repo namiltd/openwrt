@@ -7,7 +7,7 @@ There is no upstream driver yet. Merge the RTL SDK driver for now.
 Signed-off-by: John Crispin <john@phrozen.org>
 --- a/drivers/net/phy/Kconfig
 +++ b/drivers/net/phy/Kconfig
-@@ -431,6 +431,8 @@ config QSEMI_PHY
+@@ -435,6 +435,8 @@ config QSEMI_PHY
  
  source "drivers/net/phy/realtek/Kconfig"
  
