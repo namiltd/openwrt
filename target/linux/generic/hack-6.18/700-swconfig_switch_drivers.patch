@@ -12,14 +12,18 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 
 --- a/drivers/net/phy/Kconfig
 +++ b/drivers/net/phy/Kconfig
-@@ -82,6 +82,80 @@ config SFP
+@@ -82,6 +82,84 @@ config SFP
  	depends on HWMON || HWMON=n
  	select MDIO_I2C
  
 +comment "Switch configuration API + drivers"
 +
++config SWCONFIG_DISABLE
++	bool
++
 +config SWCONFIG
 +	tristate "Switch configuration API"
++	depends on !SWCONFIG_DISABLE
 +	help
 +	  Switch configuration API using netlink. This allows
 +	  you to configure the VLAN features of certain switches.
