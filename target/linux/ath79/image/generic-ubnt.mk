@@ -250,7 +250,7 @@ define Device/ubnt_routerstation
   UBNT_BOARD := RS
   UBNT_TYPE := RSx
   UBNT_CHIP := ar7100
-  DEVICE_PACKAGES += -swconfig
+  DEVICE_PACKAGES += -swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += ubnt_routerstation
 
@@ -266,7 +266,7 @@ TARGET_DEVICES += ubnt_routerstation-pro
 define Device/ubnt_uk-ultra
   $(Device/ubnt_unifiac)
   DEVICE_MODEL := UniFi Swiss Army Knife Ultra
-  DEVICE_PACKAGES += rssileds -swconfig
+  DEVICE_PACKAGES += rssileds -swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += ubnt_uk-ultra
 
@@ -288,7 +288,7 @@ TARGET_DEVICES += ubnt_unifi-ap-lr
 define Device/ubnt_unifiac-lite
   $(Device/ubnt_unifiac)
   DEVICE_MODEL := UniFi AC Lite
-  DEVICE_PACKAGES += -swconfig
+  DEVICE_PACKAGES += -swconfig -kmod-swconfig
   SUPPORTED_DEVICES += unifiac-lite
 endef
 TARGET_DEVICES += ubnt_unifiac-lite
@@ -296,7 +296,7 @@ TARGET_DEVICES += ubnt_unifiac-lite
 define Device/ubnt_unifiac-lr
   $(Device/ubnt_unifiac)
   DEVICE_MODEL := UniFi AC LR
-  DEVICE_PACKAGES += -swconfig
+  DEVICE_PACKAGES += -swconfig -kmod-swconfig
   SUPPORTED_DEVICES += unifiac-lite ubnt,unifiac-lite
 endef
 TARGET_DEVICES += ubnt_unifiac-lr
@@ -304,7 +304,7 @@ TARGET_DEVICES += ubnt_unifiac-lr
 define Device/ubnt_unifiac-mesh
   $(Device/ubnt_unifiac)
   DEVICE_MODEL := UniFi AC Mesh
-  DEVICE_PACKAGES += -swconfig
+  DEVICE_PACKAGES += -swconfig -kmod-swconfig
   SUPPORTED_DEVICES += unifiac-lite
 endef
 TARGET_DEVICES += ubnt_unifiac-mesh

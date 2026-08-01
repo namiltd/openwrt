@@ -51,7 +51,7 @@ define Device/arcadyan_arv4525pw
   DEVICE_PACKAGES := kmod-ath5k wpad-basic-mbedtls \
 	kmod-ltq-adsl-danube-mei kmod-ltq-adsl-danube \
 	kmod-ltq-adsl-danube-fw-b kmod-ltq-atm-danube \
-	ltq-adsl-app ppp-mod-pppoa -swconfig
+	ltq-adsl-app ppp-mod-pppoa -swconfig -kmod-swconfig
   SUPPORTED_DEVICES += ARV4525PW
 endef
 TARGET_DEVICES += arcadyan_arv4525pw

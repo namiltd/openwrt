@@ -8,7 +8,7 @@ define Device/avm_fritz7312
 	kmod-ltq-adsl-ar9-mei kmod-ltq-adsl-ar9 \
 	kmod-ltq-adsl-ar9-fw-b kmod-ltq-atm-ar9 \
 	ltq-adsl-app ppp-mod-pppoa \
-	kmod-ltq-deu-ar9 fritz-tffs -swconfig
+	kmod-ltq-deu-ar9 fritz-tffs -swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += avm_fritz7312
 
@@ -26,7 +26,8 @@ define Device/avm_fritz7320
 	kmod-ltq-adsl-ar9-mei kmod-ltq-adsl-ar9 \
 	kmod-ltq-adsl-ar9-fw-b kmod-ltq-atm-ar9 \
 	ltq-adsl-app ppp-mod-pppoa \
-	kmod-ltq-deu-ar9 kmod-usb-dwc2 fritz-tffs -swconfig
+	kmod-ltq-deu-ar9 kmod-usb-dwc2 fritz-tffs \
+	-swconfig -kmod-swconfig
   SUPPORTED_DEVICES += FRITZ7320
 endef
 TARGET_DEVICES += avm_fritz7320

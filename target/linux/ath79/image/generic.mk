@@ -200,7 +200,7 @@ TARGET_DEVICES += 8dev_lima
 define Device/adtran_bsap1880
   SOC := ar7161
   DEVICE_VENDOR := Adtran/Bluesocket
-  DEVICE_PACKAGES += -swconfig -uboot-envtools fconfig
+  DEVICE_PACKAGES += -swconfig -uboot-envtools -kmod-swconfig fconfig
   KERNEL := kernel-bin | append-dtb | lzma | pad-to $$(BLOCKSIZE)
   KERNEL_INITRAMFS := kernel-bin | append-dtb
   IMAGE_SIZE := 11200k
@@ -254,7 +254,7 @@ define Device/alfa-network_ap121f
   SOC := ar9331
   DEVICE_VENDOR := ALFA Network
   DEVICE_MODEL := AP121F
-  DEVICE_PACKAGES := kmod-usb-chipidea2 kmod-usb-storage -swconfig
+  DEVICE_PACKAGES := kmod-usb-chipidea2 kmod-usb-storage -swconfig -kmod-swconfig
   IMAGE_SIZE := 16064k
   SUPPORTED_DEVICES += ap121f
 endef
@@ -264,7 +264,7 @@ define Device/alfa-network_ap121fe
   SOC := ar9331
   DEVICE_VENDOR := ALFA Network
   DEVICE_MODEL := AP121FE
-  DEVICE_PACKAGES := kmod-usb-chipidea2 kmod-usb-gadget-eth -swconfig
+  DEVICE_PACKAGES := kmod-usb-chipidea2 kmod-usb-gadget-eth -swconfig -kmod-swconfig
   IMAGE_SIZE := 16064k
 endef
 TARGET_DEVICES += alfa-network_ap121fe
@@ -293,7 +293,7 @@ define Device/alfa-network_pi-wifi4
   SOC := qca9531
   DEVICE_VENDOR := ALFA Network
   DEVICE_MODEL := Pi-WiFi4
-  DEVICE_PACKAGES := kmod-usb2 kmod-usb-ledtrig-usbport -swconfig
+  DEVICE_PACKAGES := kmod-usb2 kmod-usb-ledtrig-usbport -swconfig -kmod-swconfig
   IMAGE_SIZE := 15872k
 endef
 TARGET_DEVICES += alfa-network_pi-wifi4
@@ -312,7 +312,7 @@ define Device/alfa-network_tube-2hq
   SOC := qca9531
   DEVICE_VENDOR := ALFA Network
   DEVICE_MODEL := Tube-2HQ
-  DEVICE_PACKAGES := rssileds -swconfig
+  DEVICE_PACKAGES := rssileds -swconfig -kmod-swconfig
   IMAGE_SIZE := 15872k
   SUPPORTED_DEVICES += tube-2hq
 endef
@@ -322,7 +322,7 @@ define Device/alfa-network_wifi-camppro-nano-duo
   SOC := qca9531
   DEVICE_VENDOR := ALFA Network
   DEVICE_MODEL := WiFi CampPro Nano Duo
-  DEVICE_PACKAGES := kmod-usb2 kmod-mt76x0u -swconfig
+  DEVICE_PACKAGES := kmod-usb2 kmod-mt76x0u -swconfig -kmod-swconfig
   IMAGE_SIZE := 15872k
   SUPPORTED_DEVICES += campnano-duo
 endef
@@ -380,7 +380,7 @@ define Device/arduino_yun
   DEVICE_VENDOR := Arduino
   DEVICE_MODEL := Yun
   DEVICE_PACKAGES := kmod-usb-chipidea2 kmod-usb-ledtrig-usbport \
-	kmod-usb-storage block-mount -swconfig
+	kmod-usb-storage block-mount -swconfig -kmod-swconfig
   IMAGE_SIZE := 15936k
   SUPPORTED_DEVICES += arduino-yun
 endef
@@ -453,7 +453,7 @@ define Device/asus_rp-ac51
   IMAGE/factory.bin := append-kernel | pad-to $$$$(BLOCKSIZE) | \
 	append-rootfs | pad-rootfs
   DEVICE_PACKAGES := kmod-ath10k-ct ath10k-firmware-qca9888-ct \
-	-swconfig
+	-swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += asus_rp-ac51
 
@@ -466,7 +466,7 @@ define Device/asus_rp-ac66
   IMAGE/factory.bin := append-kernel | pad-to $$$$(BLOCKSIZE) | \
 	append-rootfs | pad-rootfs
   DEVICE_PACKAGES := kmod-ath10k-ct-smallbuffers ath10k-firmware-qca988x-ct \
-	rssileds -swconfig
+	rssileds -swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += asus_rp-ac66
 
@@ -567,7 +567,7 @@ define Device/avm_fritz1750e
   IMAGE_SIZE := 15232k
   DEVICE_MODEL := FRITZ!WLAN Repeater 1750E
   DEVICE_PACKAGES += rssileds kmod-ath10k-ct-smallbuffers \
-	ath10k-firmware-qca988x-ct -swconfig
+	ath10k-firmware-qca988x-ct -swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += avm_fritz1750e
 
@@ -576,7 +576,7 @@ define Device/avm_fritz300e
   SOC := ar7242
   IMAGE_SIZE := 15232k
   DEVICE_MODEL := FRITZ!WLAN Repeater 300E
-  DEVICE_PACKAGES += rssileds -swconfig
+  DEVICE_PACKAGES += rssileds -swconfig -kmod-swconfig
   SUPPORTED_DEVICES += fritz300e
 endef
 TARGET_DEVICES += avm_fritz300e
@@ -605,7 +605,7 @@ define Device/avm_fritzdvbc
   IMAGE_SIZE := 15232k
   DEVICE_MODEL := FRITZ!WLAN Repeater DVB-C
   DEVICE_PACKAGES += rssileds kmod-ath10k-ct-smallbuffers \
-	ath10k-firmware-qca988x-ct -swconfig
+	ath10k-firmware-qca988x-ct -swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += avm_fritzdvbc
 
@@ -748,7 +748,7 @@ define Device/comfast_cf-e110n-v2
   DEVICE_VENDOR := COMFAST
   DEVICE_MODEL := CF-E110N
   DEVICE_VARIANT := v2
-  DEVICE_PACKAGES := rssileds -swconfig -uboot-envtools
+  DEVICE_PACKAGES := rssileds -swconfig -uboot-envtools -kmod-swconfig
   IMAGE_SIZE := 16192k
 endef
 TARGET_DEVICES += comfast_cf-e110n-v2
@@ -768,7 +768,7 @@ define Device/comfast_cf-e130n-v2
   DEVICE_VENDOR := COMFAST
   DEVICE_MODEL := CF-E130N
   DEVICE_VARIANT := v2
-  DEVICE_PACKAGES := rssileds -swconfig -uboot-envtools
+  DEVICE_PACKAGES := rssileds -swconfig -uboot-envtools -kmod-swconfig
   IMAGE_SIZE := 7936k
 endef
 TARGET_DEVICES += comfast_cf-e130n-v2
@@ -778,7 +778,7 @@ define Device/comfast_cf-e313ac
   DEVICE_VENDOR := COMFAST
   DEVICE_MODEL := CF-E313AC
   DEVICE_PACKAGES := rssileds kmod-ath10k-ct-smallbuffers \
-	ath10k-firmware-qca9888-ct -swconfig -uboot-envtools
+	ath10k-firmware-qca9888-ct -swconfig -uboot-envtools -kmod-swconfig
   IMAGE_SIZE := 7936k
 endef
 TARGET_DEVICES += comfast_cf-e313ac
@@ -799,7 +799,7 @@ define Device/comfast_cf-e355ac-v2
   DEVICE_MODEL := CF-E355AC
   DEVICE_VARIANT := v2
   DEVICE_PACKAGES := kmod-ath10k-ct ath10k-firmware-qca9888-ct \
-	-swconfig -uboot-envtools
+	-swconfig -uboot-envtools -kmod-swconfig
   IMAGE_SIZE := 16192k
 endef
 TARGET_DEVICES += comfast_cf-e355ac-v2
@@ -830,7 +830,7 @@ define Device/comfast_cf-e5
   DEVICE_VENDOR := COMFAST
   DEVICE_MODEL := CF-E5/E7
   DEVICE_PACKAGES := rssileds kmod-usb2 kmod-usb-net-qmi-wwan -swconfig \
-	-uboot-envtools
+	-uboot-envtools -kmod-swconfig
   IMAGE_SIZE := 16192k
 endef
 TARGET_DEVICES += comfast_cf-e5
@@ -849,7 +849,7 @@ define Device/comfast_cf-ew71-v2
   DEVICE_VENDOR := COMFAST
   DEVICE_MODEL := CF-EW71
   DEVICE_VARIANT := v2
-  DEVICE_PACKAGES := kmod-usb2 -uboot-envtools -swconfig
+  DEVICE_PACKAGES := kmod-usb2 -uboot-envtools -swconfig -kmod-swconfig
   IMAGE_SIZE := 16192k
 endef
 TARGET_DEVICES += comfast_cf-ew71-v2
@@ -859,7 +859,7 @@ define Device/comfast_cf-ew72
   DEVICE_VENDOR := COMFAST
   DEVICE_MODEL := CF-EW72
   DEVICE_PACKAGES := kmod-usb2 kmod-ath10k-ct ath10k-firmware-qca9888-ct \
-	-uboot-envtools -swconfig
+	-uboot-envtools -swconfig -kmod-swconfig
   IMAGE_SIZE := 16192k
 endef
 TARGET_DEVICES += comfast_cf-ew72
@@ -1807,7 +1807,7 @@ define Device/hak5_lan-turtle
   TPLINK_HWID := 0x5348334c
   IMAGES := sysupgrade.bin
   DEVICE_PACKAGES := kmod-usb-chipidea2 -iwinfo -kmod-ath9k -swconfig \
-	-uboot-envtools -wpad-basic-mbedtls
+	-uboot-envtools -wpad-basic-mbedtls -kmod-swconfig
   SUPPORTED_DEVICES += lan-turtle
 endef
 TARGET_DEVICES += hak5_lan-turtle
@@ -1820,7 +1820,7 @@ define Device/hak5_packet-squirrel
   TPLINK_HWID := 0x5351524c
   IMAGES := sysupgrade.bin
   DEVICE_PACKAGES := kmod-usb-chipidea2 -iwinfo -kmod-ath9k -swconfig \
-	-uboot-envtools -wpad-basic-mbedtls
+	-uboot-envtools -wpad-basic-mbedtls -kmod-swconfig
   SUPPORTED_DEVICES += packet-squirrel
 endef
 TARGET_DEVICES += hak5_packet-squirrel
@@ -1833,7 +1833,7 @@ define Device/hak5_wifi-pineapple-nano
   TPLINK_HWID := 0x4e414e4f
   IMAGES := sysupgrade.bin
   DEVICE_PACKAGES := kmod-ath9k-htc kmod-usb-chipidea2 kmod-usb-storage \
-	-swconfig -uboot-envtools
+	-swconfig -uboot-envtools -kmod-swconfig
   SUPPORTED_DEVICES += wifi-pineapple-nano
 endef
 TARGET_DEVICES += hak5_wifi-pineapple-nano
@@ -1948,7 +1948,8 @@ define Device/jjplus_ja76pf2
   SOC := ar7161
   DEVICE_VENDOR := jjPlus
   DEVICE_MODEL := JA76PF2
-  DEVICE_PACKAGES += -kmod-ath9k -swconfig -wpad-basic-mbedtls -uboot-envtools fconfig kmod-hwmon-lm75
+  DEVICE_PACKAGES += -kmod-ath9k -swconfig -wpad-basic-mbedtls -uboot-envtools \
+	-kmod-swconfig fconfig kmod-hwmon-lm75
   LOADER_TYPE := bin
   LOADER_FLASH_OFFS := 0x60000
   COMPILE := loader-$(1).bin
@@ -2951,14 +2952,14 @@ endef
 define Device/ruckus_zf7341
   $(Device/ruckus_gd11_common)
   DEVICE_MODEL := ZoneFlex 7341[-U]
-  DEVICE_PACKAGES += -swconfig
+  DEVICE_PACKAGES += -swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += ruckus_zf7341
 
 define Device/ruckus_zf7351
   $(Device/ruckus_gd11_common)
   DEVICE_MODEL := ZoneFlex 7351[-U]
-  DEVICE_PACKAGES += -swconfig
+  DEVICE_PACKAGES += -swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += ruckus_zf7351
 
@@ -2972,7 +2973,7 @@ TARGET_DEVICES += ruckus_zf7363
 
 define Device/ruckus_zf73xx_common
   $(Device/ruckus_common)
-  DEVICE_PACKAGES := -swconfig kmod-usb2 kmod-usb-chipidea2
+  DEVICE_PACKAGES := -swconfig -kmod-swconfig kmod-usb2 kmod-usb-chipidea2
   IMAGE_SIZE := 31744k
 endef
 
@@ -3099,7 +3100,8 @@ define Device/telco_t1
   DEVICE_VENDOR := Telco
   DEVICE_MODEL := T1
   DEVICE_PACKAGES := kmod-usb2 kmod-usb-net-qmi-wwan \
-	kmod-usb-serial-option uqmi -swconfig -uboot-envtools
+	kmod-usb-serial-option uqmi -swconfig -uboot-envtools \
+	-kmod-swconfig
   IMAGE_SIZE := 16192k
   SUPPORTED_DEVICES += telco_electronics,tel-t1
 endef
@@ -3288,7 +3290,7 @@ define Device/wd_mynet-wifi-rangeextender
   SOC := ar9344
   DEVICE_VENDOR := Western Digital
   DEVICE_MODEL := My Net Wi-Fi Range Extender
-  DEVICE_PACKAGES := rssileds nvram -swconfig
+  DEVICE_PACKAGES := rssileds nvram -swconfig -kmod-swconfig
   IMAGE_SIZE := 7808k
   ADDPATTERN_ID := mynet-rext
   ADDPATTERN_VERSION := 1.00.01
@@ -3378,7 +3380,7 @@ define Device/yuncore_cpe830
   IMAGE_SIZE := 16000k
   IMAGES += tftp.bin
   IMAGE/tftp.bin := $$(IMAGE/sysupgrade.bin) | yuncore-tftp-header-16m
-  DEVICE_PACKAGES := rssileds -swconfig
+  DEVICE_PACKAGES := rssileds -swconfig -kmod-swconfig
 endef
 TARGET_DEVICES += yuncore_cpe830
 

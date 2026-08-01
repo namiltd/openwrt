@@ -61,9 +61,7 @@ $(eval $(call KernelPackage,phy-mediatek-2p5g))
 define KernelPackage/switch-rtl8367s
   SUBMENU:=Network Devices
   TITLE:=Realtek RTL8367S switch support
-  KCONFIG:= \
-	CONFIG_RTL8367S_GSW \
-	CONFIG_SWCONFIG=y
+  KCONFIG:= CONFIG_RTL8367S_GSW
   DEPENDS:=@TARGET_mediatek +kmod-swconfig
   FILES:= \
 	$(LINUX_DIR)/drivers/net/phy/rtk/rtl8367s_gsw.ko

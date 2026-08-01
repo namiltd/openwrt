@@ -110,7 +110,7 @@ define Device/arcadyan_arv7525pw
   DEVICE_PACKAGES := kmod-rt2800-pci wpad-basic-mbedtls \
 	kmod-ltq-adsl-danube-mei kmod-ltq-adsl-danube \
 	kmod-ltq-adsl-danube-fw-b kmod-ltq-atm-danube \
-	ltq-adsl-app ppp-mod-pppoa -swconfig
+	ltq-adsl-app ppp-mod-pppoa -swconfig -kmod-swconfig
   SUPPORTED_DEVICES += ARV4510PW
   DEFAULT := n
 endef
