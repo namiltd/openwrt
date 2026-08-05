@@ -85,24 +85,20 @@
 			gpios = <&pio 10 GPIO_ACTIVE_LOW>;
 		};
 	};
-
-	rtkgsw@0 {
-		compatible = "mediatek,rtk-gsw";
-		mediatek,ethsys = <&ethsys>;
-		mediatek,mdio = <&mdio_bus>;
-		reset-gpios = <&pio 39 GPIO_ACTIVE_LOW>;
-		status = "okay";
-	};
 };
 
 &uart0 {
 	status = "okay";
 };
 
+&watchdog {
+	status = "okay";
+};
+
 &eth {
 	status = "okay";
 
-	mac@0 {
+	gmac0: mac@0 {
 		compatible = "mediatek,eth-mac";
 		reg = <0>;
 		phy-mode = "2500base-x";
@@ -114,25 +110,94 @@
 		};
 	};
 
-	mac@1 {
+	gmac1: mac@1 {
 		compatible = "mediatek,eth-mac";
 		reg = <1>;
 		phy-mode = "2500base-x";
 		phy-handle = <&phy15>;
 	};
-};
 
+	mdio: mdio-bus {
+		#address-cells = <1>;
+		#size-cells = <0>;
 
-&mdio_bus {
-	phy15: phy@f {
-		compatible = "ethernet-phy-id03a2.a411";
-		reg = <15>;
-		reset-gpios = <&pio 14 GPIO_ACTIVE_LOW>;
-		reset-delay-us = <200000>;
-		reset-post-delay-us = <1000000>;
-		phy-mode = "2500base-x";
-		full-duplex;
-		pause;
+		phy15: phy@f {
+			compatible = "ethernet-phy-id03a2.a411";
+			reg = <15>;
+
+			reset-gpios = <&pio 14 GPIO_ACTIVE_LOW>;
+			reset-delay-us = <200000>;
+			reset-post-delay-us = <1000000>;
+
+			phy-mode = "2500base-x";
+			full-duplex;
+			pause;
+		};
+
+		switch@1d {
+			compatible = "realtek,rtl8365mb";
+			reg = <29>;
+			reset-gpios = <&pio 39 GPIO_ACTIVE_LOW>;
+
+			interrupt-controller {
+				#interrupt-cells = <1>;
+				interrupt-parent = <&pio>;
+				interrupts = <38 IRQ_TYPE_LEVEL_HIGH>;
+			};
+
+			mdio {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				phy0: ethernet-phy@0 {
+					reg = <0>;
+				};
+
+				phy1: ethernet-phy@1 {
+					reg = <1>;
+				};
+
+				phy2: ethernet-phy@2 {
+					reg = <2>;
+				};
+			};
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					label = "lan0";
+					phy-handle = <&phy0>;
+				};
+
+				port@1 {
+					reg = <1>;
+					label = "lan1";
+					phy-handle = <&phy1>;
+				};
+
+				port@2 {
+					reg = <2>;
+					label = "lan2";
+					phy-handle = <&phy2>;
+				};
+
+				port@6 {
+					reg = <6>;
+					label = "cpu";
+					ethernet = <&gmac0>;
+					phy-mode = "2500base-x";
+
+					fixed-link {
+						speed = <2500>;
+						full-duplex;
+						pause;
+					};
+				};
+			};
+		};
 	};
 };
 
