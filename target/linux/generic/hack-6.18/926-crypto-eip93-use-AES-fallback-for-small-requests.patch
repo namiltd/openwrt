@@ -3,8 +3,12 @@ From: Aviana Cruz <gwencroft@proton.me>
 Date: Mon, 20 Jun 2022 21:55:45 +0800
 Subject: [PATCH] crypto: eip93 - use AES fallback for small requests
 
-For data blocks smaller than 1024, software crypto is faster.
+For small data blocks, software encryption is faster. After changes,
+the key length is checked and the appropriate software limit is selected
+based on whether the key is AES-128 or larger (separate thresholds).
+Only when the threshold is exceeded does hardware crypto trigger.
 
+Co-authored-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
 Signed-off-by: Aviana Cruz <gwencroft@proton.me>
 ---
 
@@ -80,8 +84,12 @@ Signed-off-by: Aviana Cruz <gwencroft@proton.me>
  }
  
  static int eip93_skcipher_setkey(struct crypto_skcipher *ctfm, const u8 *key,
-@@ -117,6 +135,14 @@ static int eip93_skcipher_setkey(struct
+@@ -115,8 +133,18 @@ static int eip93_skcipher_setkey(struct
+ 			return ret;
+ 	}
  
++	ctx->keylen = keylen;
++
  	if (flags & EIP93_ALG_AES) {
  		struct crypto_aes_ctx aes;
 +		bool fallback = eip93_skcipher_is_fallback(tfm, flags);
@@ -95,7 +103,7 @@ Signed-off-by: Aviana Cruz <gwencroft@proton.me>
  
  		ctx->blksize = AES_BLOCK_SIZE;
  		ret = aes_expandkey(&aes, key, keylen);
-@@ -133,12 +159,13 @@ static int eip93_skcipher_setkey(struct
+@@ -133,12 +161,13 @@ static int eip93_skcipher_setkey(struct
  	return 0;
  }
  
@@ -110,12 +118,12 @@ Signed-off-by: Aviana Cruz <gwencroft@proton.me>
  	int ret;
  
  	if (!req->cryptlen)
-@@ -153,6 +180,21 @@ static int eip93_skcipher_crypt(struct s
+@@ -153,6 +182,21 @@ static int eip93_skcipher_crypt(struct s
  				crypto_skcipher_blocksize(skcipher)))
  			return -EINVAL;
  
 +	if (fallback &&
-+	    req->cryptlen <= (AES_KEYSIZE_128 ?
++	    req->cryptlen <= ((ctx->keylen == AES_KEYSIZE_128) ?
 +			      CONFIG_CRYPTO_DEV_EIP93_AES_128_SW_MAX_LEN :
 +			      CONFIG_CRYPTO_DEV_EIP93_GENERIC_SW_MAX_LEN)) {
 +		skcipher_request_set_tfm(&rctx->fallback_req, ctx->fallback);
@@ -132,7 +140,7 @@ Signed-off-by: Aviana Cruz <gwencroft@proton.me>
  	ctx->sa_record_base = dma_map_single(ctx->eip93->dev, ctx->sa_record,
  					     sizeof(*ctx->sa_record), DMA_TO_DEVICE);
  	ret = dma_mapping_error(ctx->eip93->dev, ctx->sa_record_base);
-@@ -181,7 +223,7 @@ static int eip93_skcipher_encrypt(struct
+@@ -181,7 +225,7 @@ static int eip93_skcipher_encrypt(struct
  	rctx->flags = tmpl->flags;
  	rctx->flags |= EIP93_ENCRYPT;
  
@@ -141,7 +149,7 @@ Signed-off-by: Aviana Cruz <gwencroft@proton.me>
  }
  
  static int eip93_skcipher_decrypt(struct skcipher_request *req)
-@@ -196,7 +238,7 @@ static int eip93_skcipher_decrypt(struct
+@@ -196,7 +240,7 @@ static int eip93_skcipher_decrypt(struct
  	rctx->flags = tmpl->flags;
  	rctx->flags |= EIP93_DECRYPT;
  
@@ -152,15 +160,16 @@ Signed-off-by: Aviana Cruz <gwencroft@proton.me>
  /* Available algorithms in this module */
 --- a/drivers/crypto/inside-secure/eip93/eip93-cipher.h
 +++ b/drivers/crypto/inside-secure/eip93/eip93-cipher.h
-@@ -22,6 +22,7 @@ struct eip93_crypto_ctx {
+@@ -22,6 +22,8 @@ struct eip93_crypto_ctx {
  	unsigned int			assoclen;
  	bool				set_assoc;
  	enum eip93_alg_type		type;
 +	struct crypto_skcipher		*fallback;
++	u32				keylen;
  };
  
  struct eip93_cipher_reqctx {
-@@ -42,6 +43,7 @@ struct eip93_cipher_reqctx {
+@@ -42,6 +44,7 @@ struct eip93_cipher_reqctx {
  	int				dst_nents;
  	struct sa_state			*sa_state_ctr;
  	dma_addr_t			sa_state_ctr_base;
