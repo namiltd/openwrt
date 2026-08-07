@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+
+START=12
+
+apply_memory_tuning() {
+	sysctl -qw vm.min_free_kbytes="$1"
+	sysctl -qw vm.watermark_boost_factor="$2"
+}
+
+start() {
+	case "$(board_name)" in
+	mercusys,mr80x-v5)
+		# Preserve usable memory after the WCSS reservation.
+		apply_memory_tuning 8192 0
+		;;
+	esac
+}

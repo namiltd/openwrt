@@ -1,0 +1,1598 @@
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Subject: [PATCH] net: dsa: realtek: add opt-in RTL8367D switch support
+
+Add the RTL8367S-VB/RTL8367D switch and VLAN pipeline implementation, including correct transitions between standalone and VLAN-aware operation. All behavior is gated by explicit firmware properties.
+
+The RTL8367D register layouts and legacy initialization behavior are based
+on OpenWrt's GPL-2.0 rtl8367b driver, originally written by Gabor Juhos and
+later extended for RTL8367D by Mieczyslaw Nalewaj and Serge Vasilugin:
+
+Link: https://github.com/openwrt/openwrt/blob/main/target/linux/generic/files/drivers/net/phy/rtl8367b.c
+Link: https://github.com/openwrt/openwrt/pull/14804
+
+The DSA integration, per-switch opt-ins, VLAN transitions and compatibility
+fallbacks were implemented and adapted for the MR80X v5 by Fabiano Tassotti.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+
+diff --git a/drivers/net/dsa/realtek/rtl8365mb_l2.c b/drivers/net/dsa/realtek/rtl8365mb_l2.c
+index 0494d8a..48dde4c 100644
+--- a/drivers/net/dsa/realtek/rtl8365mb_l2.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_l2.c
+@@ -381,6 +381,34 @@ int rtl8365mb_l2_del_uc(struct realtek_priv *priv, int port,
+ 	return ret;
+ }
+ 
++int rtl8365mb_l2_reset(struct realtek_priv *priv)
++{
++	u32 val;
++	int ret;
++
++	/*
++	 * Boot firmware may leave the LUT full of static entries. A per-port
++	 * dynamic flush cannot remove those entries, so reset the entire table
++	 * before DSA starts installing bridge FDB entries.
++	 */
++	mutex_lock(&priv->map_lock);
++
++	ret = regmap_write(priv->map_nolock, RTL8365MB_L2_FLUSH_CTRL3_REG,
++			   FIELD_PREP(RTL8365MB_L2_FLUSH_CTRL3_MSK, 1));
++	if (ret)
++		goto out;
++
++	ret = regmap_read_poll_timeout(priv->map_nolock,
++				       RTL8365MB_L2_FLUSH_CTRL3_REG,
++				       val,
++				       !(val & RTL8365MB_L2_FLUSH_CTRL3_MSK),
++				       10, 10000);
++out:
++	mutex_unlock(&priv->map_lock);
++
++	return ret;
++}
++
+ int rtl8365mb_l2_flush(struct realtek_priv *priv, int port, u16 vid)
+ {
+ 	int mode = vid ? RTL8365MB_L2_FLUSH_CTRL2_MODE_PORT_VID :
+diff --git a/drivers/net/dsa/realtek/rtl8365mb_l2.h b/drivers/net/dsa/realtek/rtl8365mb_l2.h
+index 9470cf0..91b5eb4 100644
+--- a/drivers/net/dsa/realtek/rtl8365mb_l2.h
++++ b/drivers/net/dsa/realtek/rtl8365mb_l2.h
+@@ -21,6 +21,7 @@ int rtl8365mb_l2_del_uc(struct realtek_priv *priv, int port,
+ 			const unsigned char addr[static ETH_ALEN],
+ 			u16 efid, u16 vid);
+ int rtl8365mb_l2_flush(struct realtek_priv *priv, int port, u16 vid);
++int rtl8365mb_l2_reset(struct realtek_priv *priv);
+ 
+ int rtl8365mb_l2_add_mc(struct realtek_priv *priv, int port,
+ 			const unsigned char mac_addr[static ETH_ALEN],
+diff --git a/drivers/net/dsa/realtek/rtl8365mb_main.c b/drivers/net/dsa/realtek/rtl8365mb_main.c
+index 757e962..6e670b3 100644
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -91,12 +91,15 @@
+  */
+ 
+ #include <linux/bitfield.h>
++#include <linux/dsa/8021q.h>
+ #include <linux/bitops.h>
+ #include <linux/interrupt.h>
+ #include <linux/irqdomain.h>
+ #include <linux/mutex.h>
+ #include <linux/of_irq.h>
++#include <linux/property.h>
+ #include <linux/regmap.h>
++#include <linux/rtnetlink.h>
+ #include <linux/if_bridge.h>
+ #include <linux/if_vlan.h>
+ 
+@@ -242,6 +245,41 @@
+ #define RTL8365MB_PORT_SPEED_10M	0
+ #define RTL8365MB_PORT_SPEED_100M	1
+ #define RTL8365MB_PORT_SPEED_1000M	2
++#define RTL8365MB_PORT_SPEED_2500M	3
++
++#define RTL8367S_VB_CHIP_ID				0x6642
++#define RTL8367S_VB_CHIP_VER				0x0010
++#define RTL8367S_VB_EXT_PORT0				6
++
++static bool rtl8367s_8021q_cpu_aware;
++module_param_named(cpu_aware, rtl8367s_8021q_cpu_aware, bool, 0644);
++MODULE_PARM_DESC(cpu_aware, "Keep EXT0 in the RTL8367D CPU-aware port mask");
++
++static bool rtl8367s_8021q_transparent;
++module_param_named(transparent, rtl8367s_8021q_transparent, bool, 0644);
++MODULE_PARM_DESC(transparent, "Enable transparent VLAN forwarding");
++
++/*
++ * The RTL8367D CPU uplink can receive the upstream DHCP reply with a
++ * switch-generated 802.1Q VID that is not present in the user-port
++ * membership bitmap. Keep ingress filtering opt-in for compatibility with
++ * existing RTL8367S boards; a board needing the stricter behavior can opt in
++ * through the realtek,rtl8367d-ingress-filter device-tree property.
++ */
++static bool rtl8367s_8021q_ingress_filter;
++module_param_named(ingress_filter, rtl8367s_8021q_ingress_filter, bool, 0644);
++MODULE_PARM_DESC(ingress_filter, "Enable VLAN ingress membership filtering");
++static bool rtl8367s_8021q_wan_ingress_filter = true;
++module_param_named(wan_ingress_filter, rtl8367s_8021q_wan_ingress_filter, bool, 0644);
++MODULE_PARM_DESC(wan_ingress_filter, "Enable VLAN ingress filtering on the WAN port");
++
++static int rtl8367s_8021q_egress_mode;
++module_param_named(egress_mode, rtl8367s_8021q_egress_mode, int, 0644);
++MODULE_PARM_DESC(egress_mode, "RTL8367D VLAN egress mode (0..3)");
++
++int rtl8367s_vlan_port_set_direct_pvid(struct realtek_priv *priv,
++						      int port, u16 vid);
++static int rtl8367d_load_nctrl_firmware(struct realtek_priv *priv);
+ 
+ /* External interface force configuration registers 0~2 */
+ #define RTL8365MB_DIGITAL_INTERFACE_FORCE_REG0		0x1310 /* EXT0 */
+@@ -652,6 +690,19 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
+ 		.jam_table = rtl8365mb_init_jam_8365mb_vc,
+ 		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
+ 	},
++	{
++		.name = "RTL8367S-VB",
++		.chip_id = RTL8367S_VB_CHIP_ID,
++		.chip_ver = RTL8367S_VB_CHIP_VER,
++		.extints = {
++			/* The MR80X CPU MAC6 is wired to RTL8367D EXT1. */
++			{ 6, 1, PHY_INTF(SGMII) | PHY_INTF(HSGMII) },
++			{ 7, 2, PHY_INTF(MII) | PHY_INTF(TMII) |
++				PHY_INTF(RMII) | PHY_INTF(RGMII) },
++		},
++		.jam_table = rtl8365mb_init_jam_8365mb_vc,
++		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
++	},
+ };
+ 
+ enum rtl8365mb_stp_state {
+@@ -738,6 +789,12 @@ struct rtl8365mb {
+ 	int irq;
+ 	const struct rtl8365mb_chip_info *chip_info;
+ 	struct rtl8365mb_cpu cpu;
++	bool rtl8367d_cpu_aware;
++	bool rtl8367d_transparent;
++	bool rtl8367d_ingress_filter;
++	bool rtl8367d_wan_ingress_filter;
++	u8 rtl8367d_egress_mode;
++	u8 rtl8367d_wan_port;
+ 	struct mutex mib_lock;
+ 	struct rtl8365mb_port ports[RTL8365MB_MAX_NUM_PORTS];
+ };
+@@ -943,6 +1000,27 @@ rtl8365mb_get_port_extint(struct realtek_priv *priv, int port)
+ 	return NULL;
+ }
+ 
++static bool rtl8367s_vb_use_8021q_tagging(struct realtek_priv *priv)
++{
++	struct rtl8365mb *mb = priv->chip_data;
++
++	if (!mb || !mb->chip_info)
++		return false;
++
++	return mb->chip_info->chip_id == RTL8367S_VB_CHIP_ID &&
++	       mb->chip_info->chip_ver == RTL8367S_VB_CHIP_VER &&
++	       device_property_present(priv->dev,
++				       "realtek,rtl8367d-8021q-tagging");
++}
++
++bool rtl8367s_vb_uses_rtl8367d_vlan(struct realtek_priv *priv)
++{
++	return rtl8367s_vb_use_8021q_tagging(priv);
++}
++
++static void rtl8365mb_port_stp_state_set(struct dsa_switch *ds, int port,
++					 u8 state);
++
+ static enum dsa_tag_protocol
+ rtl8365mb_get_tag_protocol(struct dsa_switch *ds, int port,
+ 			   enum dsa_tag_protocol mp)
+@@ -954,6 +1032,9 @@ rtl8365mb_get_tag_protocol(struct dsa_switch *ds, int port,
+ 	mb = priv->chip_data;
+ 	cpu = &mb->cpu;
+ 
++	if (rtl8367s_vb_use_8021q_tagging(priv))
++		return DSA_TAG_PROTO_VSC73XX_8021Q;
++
+ 	if (cpu->position == RTL8365MB_CPU_POS_BEFORE_CRC)
+ 		return DSA_TAG_PROTO_RTL8_4T;
+ 
+@@ -1042,12 +1123,151 @@ static int rtl8365mb_ext_config_rgmii(struct realtek_priv *priv, int port,
+ 	return 0;
+ }
+ 
++static int rtl8365mb_ext_config_hsgmii(struct realtek_priv *priv, int port);
++
++static int rtl8365mb_ext_config_sgmii(struct realtek_priv *priv, int port)
++{
++	static const u16 rtl8367d_hsgmii_cfg[][2] = {
++		{ 0x0427, 0x4e0c }, { 0x0428, 0xaa00 },
++		{ 0x0425, 0x5189 }, { 0x0424, 0x8414 },
++		{ 0x0423, 0x1020 }, { 0x0410, 0x0002 },
++		{ 0x0504, 0x051b }, { 0x0421, 0x8e13 },
++		{ 0x0422, 0x1140 }, { 0x0004, 0x074f },
++	};
++	const struct rtl8365mb_extint *extint =
++		rtl8365mb_get_port_extint(priv, port);
++	struct rtl8365mb *mb = priv->chip_data;
++	int ret;
++	int i;
++
++	if (!extint)
++		return -ENODEV;
++
++	if (mb->chip_info->chip_id == RTL8367S_VB_CHIP_ID) {
++		for (i = 0; i < ARRAY_SIZE(rtl8367d_hsgmii_cfg); i++) {
++			ret = regmap_write(priv->map, 0x6602,
++					   rtl8367d_hsgmii_cfg[i][1]);
++			if (ret)
++				return ret;
++
++			ret = regmap_write(priv->map, 0x6601,
++					   rtl8367d_hsgmii_cfg[i][0]);
++			if (ret)
++				return ret;
++
++			ret = regmap_write(priv->map, 0x6600, 0x00cd);
++			if (ret)
++				return ret;
++		}
++
++		ret = regmap_update_bits(priv->map, 0x1d11, BIT(9), BIT(9));
++		if (ret)
++			return ret;
++
++		ret = regmap_update_bits(priv->map, 0x13e8,
++					 GENMASK(7, 6), BIT(6));
++		if (ret)
++			return ret;
++
++		ret = regmap_update_bits(priv->map, 0x1d11,
++					 BIT(10) | BIT(11), BIT(10) | BIT(11));
++		if (ret)
++			return ret;
++
++		dev_info(priv->dev,
++			 "RTL8367S-VB: RTL8367D HSGMII SerDes configured\n");
++
++		return regmap_update_bits(priv->map, 0x1d11,
++					  GENMASK(4, 0), 0x12);
++	}
++
++	ret = regmap_update_bits(
++		priv->map, RTL8365MB_DIGITAL_INTERFACE_SELECT_REG(extint->id),
++		RTL8365MB_DIGITAL_INTERFACE_SELECT_MODE_MASK(extint->id),
++		RTL8365MB_EXT_PORT_MODE_SGMII
++			<< RTL8365MB_DIGITAL_INTERFACE_SELECT_MODE_OFFSET(
++				   extint->id));
++
++	return ret;
++}
++
++static int rtl8365mb_ext_config_hsgmii(struct realtek_priv *priv, int port)
++{
++	const struct rtl8365mb_extint *extint =
++		rtl8365mb_get_port_extint(priv, port);
++	int ret;
++
++	if (!extint)
++		return -ENODEV;
++
++	ret = regmap_update_bits(
++		priv->map, RTL8365MB_DIGITAL_INTERFACE_SELECT_REG(extint->id),
++		RTL8365MB_DIGITAL_INTERFACE_SELECT_MODE_MASK(extint->id),
++		RTL8365MB_EXT_PORT_MODE_HSGMII
++			<< RTL8365MB_DIGITAL_INTERFACE_SELECT_MODE_OFFSET(
++				   extint->id));
++	if (ret)
++		return ret;
++
++	if (port != 6)
++		return 0;
++
++	ret = regmap_update_bits(priv->map, 0x1305, 0x00f0, 0);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(priv->map, 0x03f7, BIT(1), 0);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(priv->map, 0x1d41, BIT(5) | BIT(7), 0);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(priv->map, 0x1d95, BIT(0) | BIT(1), 0);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(priv->map, 0x1d11, BIT(6) | BIT(9), 0);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(priv->map, 0x1d11, BIT(11), BIT(11));
++	if (ret)
++		return ret;
++
++	ret = regmap_write(priv->map, 0x00d0, 0x0007);
++	if (ret)
++		return ret;
++
++	ret = regmap_write(priv->map, 0x0399, 0x0007);
++	if (ret)
++		return ret;
++
++	ret = regmap_write(priv->map, 0x03fa, 0x0007);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(priv->map, 0x1d95, BIT(13), BIT(13));
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(priv->map, 0x1d95, 0x1f00, 0x12 << 8);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(priv->map, 0x1d95, BIT(2), 0);
++
++	return ret;
++}
++
+ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
+ 					  bool link, int speed, int duplex,
+ 					  bool tx_pause, bool rx_pause)
+ {
+ 	const struct rtl8365mb_extint *extint =
+ 		rtl8365mb_get_port_extint(priv, port);
++	struct rtl8365mb *mb = priv->chip_data;
+ 	u32 r_tx_pause;
+ 	u32 r_rx_pause;
+ 	u32 r_duplex;
+@@ -1059,13 +1279,43 @@ static int rtl8365mb_ext_config_forcemode(struct realtek_priv *priv, int port,
+ 	if (!extint)
+ 		return -ENODEV;
+ 
++	if (mb->chip_info->chip_id == RTL8367S_VB_CHIP_ID && port == 6) {
++		u32 ability = link ? 0x1075 : 0;
++		u32 ability_rb;
++		u32 force_rb;
++
++		/* RTL8367D MAC6 uses dedicated force-ability registers. */
++		ret = regmap_write(priv->map, 0x12c6, ability & ~BIT(4));
++		if (ret)
++			return ret;
++
++		ret = regmap_write(priv->map, 0x12ce, link ? 0xffff : 0);
++		if (ret)
++			return ret;
++
++		ret = regmap_write(priv->map, 0x12c6, ability);
++		if (ret)
++			return ret;
++
++		regmap_read(priv->map, 0x12c6, &ability_rb);
++		regmap_read(priv->map, 0x12ce, &force_rb);
++		dev_info(priv->dev,
++			 "RTL8367S-VB: RTL8367D MAC6 force ability=0x%04x enable=0x%04x\n",
++			 ability_rb, force_rb);
++
++		return 0;
++	}
++
+ 	if (link) {
+ 		/* Force the link up with the desired configuration */
+ 		r_link = 1;
+ 		r_rx_pause = rx_pause ? 1 : 0;
+ 		r_tx_pause = tx_pause ? 1 : 0;
+ 
+-		if (speed == SPEED_1000) {
++		if (speed == SPEED_2500 &&
++		    rtl8367s_vb_use_8021q_tagging(priv)) {
++			r_speed = RTL8365MB_PORT_SPEED_2500M;
++		} else if (speed == SPEED_1000) {
+ 			r_speed = RTL8365MB_PORT_SPEED_1000M;
+ 		} else if (speed == SPEED_100) {
+ 			r_speed = RTL8365MB_PORT_SPEED_100M;
+@@ -1122,6 +1372,10 @@ static void rtl8365mb_phylink_get_caps(struct dsa_switch *ds, int port,
+ 	config->mac_capabilities = MAC_SYM_PAUSE | MAC_ASYM_PAUSE |
+ 				   MAC_10 | MAC_100 | MAC_1000FD;
+ 
++	if (rtl8367s_vb_use_8021q_tagging(ds->priv) && extint &&
++	    extint->supported_interfaces & RTL8365MB_PHY_INTERFACE_MODE_HSGMII)
++		config->mac_capabilities |= MAC_2500FD;
++
+ 	if (!extint) {
+ 		__set_bit(PHY_INTERFACE_MODE_INTERNAL,
+ 			  config->supported_interfaces);
+@@ -1141,6 +1395,13 @@ static void rtl8365mb_phylink_get_caps(struct dsa_switch *ds, int port,
+ 
+ 	if (extint->supported_interfaces & RTL8365MB_PHY_INTERFACE_MODE_RGMII)
+ 		phy_interface_set_rgmii(config->supported_interfaces);
++
++	if (extint->supported_interfaces & RTL8365MB_PHY_INTERFACE_MODE_SGMII)
++		__set_bit(PHY_INTERFACE_MODE_SGMII, config->supported_interfaces);
++
++	if (extint->supported_interfaces & RTL8365MB_PHY_INTERFACE_MODE_HSGMII)
++		__set_bit(PHY_INTERFACE_MODE_2500BASEX,
++			  config->supported_interfaces);
+ }
+ 
+ static void rtl8365mb_phylink_mac_config(struct phylink_config *config,
+@@ -1168,6 +1429,26 @@ static void rtl8365mb_phylink_mac_config(struct phylink_config *config,
+ 		return;
+ 	}
+ 
++	if (state->interface == PHY_INTERFACE_MODE_SGMII) {
++		ret = rtl8365mb_ext_config_sgmii(priv, port);
++		if (ret)
++			dev_err(priv->dev,
++				"failed to configure SGMII mode on port %d: %pe\n",
++				port, ERR_PTR(ret));
++
++		return;
++	}
++
++	if (state->interface == PHY_INTERFACE_MODE_2500BASEX) {
++		ret = rtl8365mb_ext_config_hsgmii(priv, port);
++		if (ret)
++			dev_err(priv->dev,
++				"failed to configure HSGMII mode on port %d: %pe\n",
++				port, ERR_PTR(ret));
++
++		return;
++	}
++
+ 	/* TODO: Implement MII and RMII modes, which the RTL8365MB-VC also
+ 	 * supports
+ 	 */
+@@ -1188,7 +1469,14 @@ static void rtl8365mb_phylink_mac_link_down(struct phylink_config *config,
+ 	p = &mb->ports[port];
+ 	cancel_delayed_work_sync(&p->mib_work);
+ 
+-	if (phy_interface_mode_is_rgmii(interface)) {
++	if (phy_interface_mode_is_rgmii(interface) ||
++	    interface == PHY_INTERFACE_MODE_SGMII ||
++	    interface == PHY_INTERFACE_MODE_2500BASEX) {
++		if (rtl8367s_vb_use_8021q_tagging(priv) &&
++		    (dsa_port_is_cpu(dp) || !dsa_port_bridge_dev_get(dp)))
++			rtl8365mb_port_stp_state_set(dp->ds, port,
++						     BR_STATE_DISABLED);
++
+ 		ret = rtl8365mb_ext_config_forcemode(priv, port, false, 0, 0,
+ 						     false, false);
+ 		if (ret)
+@@ -1218,7 +1506,9 @@ static void rtl8365mb_phylink_mac_link_up(struct phylink_config *config,
+ 	p = &mb->ports[port];
+ 	schedule_delayed_work(&p->mib_work, 0);
+ 
+-	if (phy_interface_mode_is_rgmii(interface)) {
++	if (phy_interface_mode_is_rgmii(interface) ||
++	    interface == PHY_INTERFACE_MODE_SGMII ||
++	    interface == PHY_INTERFACE_MODE_2500BASEX) {
+ 		ret = rtl8365mb_ext_config_forcemode(priv, port, true, speed,
+ 						     duplex, tx_pause,
+ 						     rx_pause);
+@@ -1227,6 +1517,11 @@ static void rtl8365mb_phylink_mac_link_up(struct phylink_config *config,
+ 				"failed to force mode on port %d: %pe\n", port,
+ 				ERR_PTR(ret));
+ 
++		if (rtl8367s_vb_use_8021q_tagging(priv) &&
++		    (dsa_port_is_cpu(dp) || !dsa_port_bridge_dev_get(dp)))
++			rtl8365mb_port_stp_state_set(dp->ds, port,
++						     BR_STATE_FORWARDING);
++
+ 		return;
+ 	}
+ }
+@@ -1343,6 +1638,12 @@ static int rtl8365mb_port_vlan_filtering(struct dsa_switch *ds, int port,
+ 	enum rtl8365mb_frame_ingress accepted_frame, prev_accepted_frame;
+ 	enum rtl8365mb_vlan_egress_mode mode;
+ 	struct realtek_priv *priv = ds->priv;
++	struct rtl8365mb *mb = priv->chip_data;
++	bool ingress_filtering = vlan_filtering;
++	bool old_ingress_filtering = !vlan_filtering;
++	bool transparent = !vlan_filtering;
++	bool old_transparent = vlan_filtering;
++	bool use_8021q;
+ 	u32 configured_ports = 0;
+ 	struct dsa_port *dp;
+ 	u16 pvid_vid;
+@@ -1377,7 +1678,27 @@ static int rtl8365mb_port_vlan_filtering(struct dsa_switch *ds, int port,
+ 	 * called for all member ports. We need to enable/disable ingress
+ 	 * VLAN membership check.
+ 	 */
+-	ret = rtl8365mb_port_set_ingress_filtering(priv, port, vlan_filtering);
++	use_8021q = rtl8367s_vb_use_8021q_tagging(priv);
++	if (use_8021q) {
++		bool fallback_ingress = mb->rtl8367d_ingress_filter;
++
++		if (ds->tag_8021q_vlan_upper_rx)
++			fallback_ingress = false;
++		else if (port == mb->rtl8367d_wan_port &&
++		    !mb->rtl8367d_wan_ingress_filter)
++			fallback_ingress = false;
++
++		if (vlan_filtering) {
++			old_ingress_filtering = fallback_ingress;
++			old_transparent = mb->rtl8367d_transparent;
++		} else {
++			ingress_filtering = fallback_ingress;
++			transparent = mb->rtl8367d_transparent;
++		}
++	}
++
++	ret = rtl8365mb_port_set_ingress_filtering(priv, port,
++						   ingress_filtering);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -1389,7 +1710,7 @@ static int rtl8365mb_port_vlan_filtering(struct dsa_switch *ds, int port,
+ 	dsa_switch_for_each_available_port(dp, ds) {
+ 		/* port isolation will still keep traffic inside the bridge */
+ 		ret = rtl8365mb_port_set_transparent(priv, port, dp->index,
+-						     !vlan_filtering);
++						     transparent);
+ 		if (ret)
+ 			goto undo_transparent;
+ 
+@@ -1412,6 +1733,8 @@ static int rtl8365mb_port_vlan_filtering(struct dsa_switch *ds, int port,
+ 	 */
+ 	if (vlan_filtering)
+ 		mode = RTL8365MB_VLAN_EGRESS_MODE_ORIGINAL;
++	else if (use_8021q)
++		mode = mb->rtl8367d_egress_mode;
+ 	else
+ 		mode = RTL8365MB_VLAN_EGRESS_MODE_REAL_KEEP;
+ 
+@@ -1438,10 +1761,11 @@ undo_transparent:
+ 	dsa_switch_for_each_port(dp, ds) {
+ 		if (configured_ports & BIT(dp->index))
+ 			rtl8365mb_port_set_transparent(priv, port, dp->index,
+-						       vlan_filtering);
++						       old_transparent);
+ 	}
+ 
+-	rtl8365mb_port_set_ingress_filtering(priv, port, !vlan_filtering);
++	rtl8365mb_port_set_ingress_filtering(priv, port,
++					     old_ingress_filtering);
+ 
+ 	return ret;
+ }
+@@ -1515,6 +1839,7 @@ static int rtl8365mb_port_vlan_del(struct dsa_switch *ds, int port,
+ 	bool untagged = !!(vlan->flags & BRIDGE_VLAN_INFO_UNTAGGED);
+ 	bool pvid = !!(vlan->flags & BRIDGE_VLAN_INFO_PVID);
+ 	struct realtek_priv *priv = ds->priv;
++	struct rtl8365mb *mb = priv->chip_data;
+ 	int ret;
+ 
+ 	dev_dbg(priv->dev, "del VLAN %d on port %d, %s, %s\n",
+@@ -1525,6 +1850,13 @@ static int rtl8365mb_port_vlan_del(struct dsa_switch *ds, int port,
+ 	if (vlan->vid == 0)
+ 		return -EOPNOTSUPP;
+ 
++	if (!rtl8367s_vb_use_8021q_tagging(priv) &&
++	    fwnode_property_present(dev_fwnode(priv->dev),
++				    "realtek,rtl8367d-standalone-wan-vlan") &&
++	    vlan->vid == 1 &&
++	    (port == mb->rtl8367d_wan_port || port == mb->cpu.trap_port))
++		return 0;
++
+ 	mutex_lock(&priv->vlan_lock);
+ 	ret = rtl8365mb_vlan_pvid_port_clear(ds, port, vlan->vid);
+ 	if (ret)
+@@ -1547,12 +1879,21 @@ out_unlock:
+  * isolation masks restricting egress to CPU ports only.
+  *
+  */
+-static int rtl8365mb_vlan_setup(struct dsa_switch *ds)
++static int rtl8365mb_vlan_setup(struct dsa_switch *ds, bool reset_vlanmc)
+ {
+ 	struct realtek_priv *priv = ds->priv;
+ 	struct dsa_port *dp;
+ 	int ret;
+ 
++	if (reset_vlanmc) {
++		ret = rtl8365mb_vlan_mc_reset(priv);
++		if (ret) {
++			dev_err(priv->dev,
++				"Failed to reset VLAN member configuration\n");
++			return ret;
++		}
++	}
++
+ 	dsa_switch_for_each_available_port(dp, ds) {
+ 		/* Disable vlan-filtering for all ports */
+ 		ret = rtl8365mb_port_vlan_filtering(ds, dp->index, false, NULL);
+@@ -2348,6 +2689,13 @@ static int rtl8365mb_change_tag_protocol(struct dsa_switch *ds,
+ 		cpu->format = RTL8365MB_CPU_FORMAT_8BYTES;
+ 		cpu->position = RTL8365MB_CPU_POS_BEFORE_CRC;
+ 		break;
++	case DSA_TAG_PROTO_VSC73XX_8021Q:
++		if (!rtl8367s_vb_use_8021q_tagging(priv))
++			return -EPROTONOSUPPORT;
++
++		dev_info(priv->dev,
++			 "RTL8367S-VB: using DSA 802.1Q VLAN tagger\n");
++		return 0;
+ 	/* The switch also supports a 4-byte format, similar to rtl4a but with
+ 	 * the same 0x04 8-bit version and probably 8-bit port source/dest.
+ 	 * There is no public doc about it. Not supported yet and it will probably
+@@ -2357,6 +2705,16 @@ static int rtl8365mb_change_tag_protocol(struct dsa_switch *ds,
+ 		return -EPROTONOSUPPORT;
+ 	}
+ 
++	/* DSA can ask for the active tag protocol before setup has walked
++	 * the CPU ports and filled the runtime CPU-port mask/trap port. Do
++	 * not write the CPU control register in that early state, otherwise
++	 * CPU tagging is disabled again and user-port frames are discarded
++	 * inside the switch before they reach the DSA master.
++	 */
++	if (rtl8367s_vb_use_8021q_tagging(priv) &&
++	    (!cpu->enable || cpu->trap_port == RTL8365MB_MAX_NUM_PORTS))
++		return 0;
++
+ 	return rtl8365mb_cpu_config(priv);
+ }
+ 
+@@ -2390,6 +2748,85 @@ static int rtl8365mb_switch_init(struct realtek_priv *priv)
+ 	return 0;
+ }
+ 
++static int rtl8367s_vb_tag_8021q_vlan_add(struct dsa_switch *ds, int port,
++					  u16 vid, u16 flags)
++{
++	struct realtek_priv *priv = ds->priv;
++	struct rtl8365mb *mb = priv->chip_data;
++	struct rtl8365mb_cpu *cpu = &mb->cpu;
++	int ret;
++
++	if (!rtl8367s_vb_use_8021q_tagging(priv))
++		return -EOPNOTSUPP;
++
++	if (cpu->trap_port == RTL8365MB_MAX_NUM_PORTS)
++		return -EINVAL;
++
++	if (port == cpu->trap_port) {
++		dev_info(priv->dev,
++			 "RTL8367S-VB: tag_8021q skip CPU port %d PVID for VID %u flags=0x%x\n",
++			 port, vid, flags);
++		return 0;
++	}
++
++	mutex_lock(&priv->vlan_lock);
++	ret = rtl8367s_vlan_tag_8021q_port_add(ds, port, cpu->trap_port, vid,
++					       flags);
++	mutex_unlock(&priv->vlan_lock);
++
++	return ret;
++}
++
++static int rtl8367s_vb_tag_8021q_vlan_del(struct dsa_switch *ds, int port,
++					  u16 vid)
++{
++	struct realtek_priv *priv = ds->priv;
++	int ret;
++
++	mutex_lock(&priv->vlan_lock);
++	ret = rtl8367s_vlan_tag_8021q_port_del(ds, port, vid);
++	mutex_unlock(&priv->vlan_lock);
++
++	return ret;
++}
++
++/* A standalone DSA user port does not receive a bridge VLAN callback. */
++static int rtl8367s_vb_setup_standalone_wan_vlan(struct dsa_switch *ds,
++							 bool cpu_untagged)
++{
++	struct realtek_priv *priv = ds->priv;
++	struct rtl8365mb *mb = priv->chip_data;
++	struct switchdev_obj_port_vlan vlan = {
++		.vid = 1,
++		.flags = BRIDGE_VLAN_INFO_UNTAGGED | BRIDGE_VLAN_INFO_PVID,
++	};
++	int ret;
++
++	ret = rtl8365mb_port_vlan_add(ds, mb->rtl8367d_wan_port,
++				      &vlan, NULL);
++	if (ret)
++		return ret;
++
++	if (cpu_untagged)
++		ret = rtl8365mb_port_vlan_add(ds, mb->cpu.trap_port, &vlan, NULL);
++	else {
++		struct switchdev_obj_port_vlan cpu_vlan = vlan;
++
++		cpu_vlan.flags = 0;
++		ret = rtl8365mb_port_vlan_add(ds, mb->cpu.trap_port,
++					      &cpu_vlan, NULL);
++	}
++	if (ret)
++		rtl8365mb_port_vlan_del(ds, mb->rtl8367d_wan_port, &vlan);
++
++	if (!ret)
++		dev_info(priv->dev,
++			 "RTL8367S-VB: standalone WAN VLAN 1 installed on port %u and CPU port %u\n",
++			 mb->rtl8367d_wan_port, mb->cpu.trap_port);
++
++	return ret;
++}
++
+ static int rtl8365mb_reset_chip(struct realtek_priv *priv)
+ {
+ 	u32 val;
+@@ -2413,8 +2850,13 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
+ 	u32 downports_mask = 0;
+ 	u32 upports_mask = 0;
+ 	struct rtl8365mb *mb;
++	struct dsa_port *other_dp;
+ 	struct dsa_port *dp;
++	bool use_8021q;
++	bool standalone_wan_vlan;
+ 	int ret;
++	u32 quirk_value;
++	struct fwnode_handle *fwnode = dev_fwnode(priv->dev);
+ 
+ 	mb = priv->chip_data;
+ 	cpu = &mb->cpu;
+@@ -2533,6 +2975,61 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
+ 
+ 	cpu->mask = upports_mask;
+ 	cpu->enable = cpu->mask > 0;
++	use_8021q = rtl8367s_vb_use_8021q_tagging(priv);
++	standalone_wan_vlan = !use_8021q &&
++		fwnode_property_present(fwnode,
++					"realtek,rtl8367d-standalone-wan-vlan");
++
++	ds->tag_8021q_vlan_upper_rx = use_8021q &&
++		fwnode_property_present(fwnode,
++					"realtek,rtl8367d-standalone-vlan-uppers");
++	/* Module parameters remain the legacy fallback. Firmware properties
++	 * override them only for the switch instance that declares them.
++	 */
++	mb->rtl8367d_cpu_aware = rtl8367s_8021q_cpu_aware;
++	mb->rtl8367d_transparent = rtl8367s_8021q_transparent;
++	mb->rtl8367d_ingress_filter = rtl8367s_8021q_ingress_filter;
++	mb->rtl8367d_wan_ingress_filter = rtl8367s_8021q_wan_ingress_filter;
++	mb->rtl8367d_egress_mode = clamp_t(int, rtl8367s_8021q_egress_mode,
++					   RTL8365MB_VLAN_EGRESS_MODE_ORIGINAL,
++					   RTL8365MB_VLAN_EGRESS_MODE_REAL_KEEP);
++	/* DSA port 0 is the board WAN port; EXT0/6 is the CPU-facing port. */
++	mb->rtl8367d_wan_port = 0;
++
++	if (use_8021q) {
++		if (fwnode_property_present(fwnode,
++					    "realtek,rtl8367d-ingress-filter"))
++			mb->rtl8367d_ingress_filter = true;
++		if (fwnode_property_present(fwnode,
++					    "realtek,rtl8367d-transparent"))
++			mb->rtl8367d_transparent = true;
++		if (fwnode_property_present(fwnode,
++					    "realtek,rtl8367d-no-wan-ingress-filter"))
++			mb->rtl8367d_wan_ingress_filter = false;
++		if (fwnode_property_present(fwnode,
++					    "realtek,rtl8367d-cpu-aware"))
++			mb->rtl8367d_cpu_aware = true;
++		if (!fwnode_property_read_u32(fwnode,
++					      "realtek,rtl8367d-egress-mode",
++					      &quirk_value))
++			mb->rtl8367d_egress_mode = clamp_t(u32, quirk_value,
++				RTL8365MB_VLAN_EGRESS_MODE_ORIGINAL,
++				RTL8365MB_VLAN_EGRESS_MODE_REAL_KEEP);
++		if (!fwnode_property_read_u32(fwnode,
++					      "realtek,rtl8367d-wan-port",
++					      &quirk_value) &&
++		    quirk_value < ds->num_ports)
++			mb->rtl8367d_wan_port = quirk_value;
++
++		dev_info(priv->dev,
++			 "RTL8367S-VB: per-switch quirks ingress=%u transparent=%u wan-ingress=%u cpu-aware=%u egress=%u wan-port=%u\n",
++			 mb->rtl8367d_ingress_filter,
++			 mb->rtl8367d_transparent,
++			 mb->rtl8367d_wan_ingress_filter,
++			 mb->rtl8367d_cpu_aware,
++			 mb->rtl8367d_egress_mode,
++			 mb->rtl8367d_wan_port);
++	}
+ 
+ 	if (!cpu->enable) {
+ 		dev_err(priv->dev, "no CPU port defined\n");
+@@ -2540,9 +3037,27 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
+ 		goto out_teardown_irq;
+ 	}
+ 
+-	ret = rtl8365mb_cpu_config(priv);
+-	if (ret)
+-		goto out_teardown_irq;
++	if (use_8021q) {
++		/* The RTL8367D SDK clears CPU_PORT_MASK when CPU_CTRL is
++		 * disabled. tag_8021q needs EXT0 to behave as a normal VLAN
++		 * uplink; port isolation already directs user traffic there.
++		 */
++		ret = regmap_write(priv->map, RTL8365MB_CPU_PORT_MASK_REG,
++				   mb->rtl8367d_cpu_aware ? cpu->mask : 0);
++		if (ret)
++			goto out_teardown_irq;
++
++		ret = regmap_write(priv->map, RTL8365MB_CPU_CTRL_REG, 0);
++		if (ret)
++			goto out_teardown_irq;
++
++		dev_info(priv->dev, "RTL8367S-VB: 802.1Q CPU-aware mask %s\n",
++			 mb->rtl8367d_cpu_aware ? "enabled" : "disabled");
++	} else {
++		ret = rtl8365mb_cpu_config(priv);
++		if (ret)
++			goto out_teardown_irq;
++	}
+ 
+ 	ret = rtl8365mb_port_change_mtu(ds, cpu->trap_port, ETH_DATA_LEN);
+ 	if (ret)
+@@ -2555,11 +3070,109 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
+ 
+ 	ds->configure_vlan_while_not_filtering = true;
+ 
++	if (use_8021q) {
++		ret = rtl8365mb_l2_reset(priv);
++		if (ret) {
++			dev_err(priv->dev, "Failed to reset L2 table\n");
++			goto out_teardown_irq;
++		}
++	}
++
+ 	/* Set up VLAN */
+-	ret = rtl8365mb_vlan_setup(ds);
++	ret = rtl8365mb_vlan_setup(ds, use_8021q);
+ 	if (ret)
+ 		goto out_teardown_irq;
+ 
++	if (standalone_wan_vlan) {
++		ret = rtl8367s_vb_setup_standalone_wan_vlan(ds, use_8021q);
++		if (ret) {
++			dev_err(priv->dev,
++				"Failed to install standalone WAN VLAN: %pe\n",
++				ERR_PTR(ret));
++			goto out_teardown_irq;
++		}
++	}
++	if (use_8021q) {
++		u32 ingress_rb = 0;
++		u32 rb;
++
++		rtnl_lock();
++		ret = dsa_tag_8021q_register(ds, htons(ETH_P_8021Q));
++		rtnl_unlock();
++		if (ret)
++			goto out_teardown_irq;
++
++		dev_info(priv->dev,
++			 "RTL8367S-VB: DSA 802.1Q tag path registered on CPU port %u\n",
++			 cpu->trap_port);
++
++		/* rtl8365mb_vlan_setup() selected transparent/REALKEEP mode for
++		 * normal standalone forwarding. tag_8021q instead needs the VLAN
++		 * table to add the RX VID towards the CPU and remove the TX VID
++		 * towards the user port.
++		 */
++		dsa_switch_for_each_available_port(dp, ds) {
++			dsa_switch_for_each_available_port(other_dp, ds) {
++				ret = rtl8365mb_port_set_transparent(priv,
++							     dp->index,
++							     other_dp->index,
++							     mb->rtl8367d_transparent);
++				if (ret)
++					goto out_unregister_8021q;
++			}
++
++			ret = rtl8365mb_port_set_vlan_egress_mode(
++				priv, dp->index, mb->rtl8367d_egress_mode);
++			if (ret)
++				goto out_unregister_8021q;
++
++			bool port_ingress_filter = mb->rtl8367d_ingress_filter;
++			if (dsa_port_is_cpu(dp))
++				port_ingress_filter = false;
++			else if (ds->tag_8021q_vlan_upper_rx)
++				port_ingress_filter = false;
++			else if (dp->index == mb->rtl8367d_wan_port &&
++			    !mb->rtl8367d_wan_ingress_filter)
++				port_ingress_filter = false;
++
++			ret = rtl8365mb_port_set_ingress_filtering(priv,
++								  dp->index,
++								  port_ingress_filter);
++			if (ret)
++				goto out_unregister_8021q;
++		}
++
++		regmap_read(priv->map, RTL8365MB_VLAN_INGRESS_REG, &ingress_rb);
++		dev_info(priv->dev,
++			 "RTL8367S-VB: 802.1Q pipeline cpu-aware=%u transparent=%u ingress=0x%04x egress=%d\n",
++			 mb->rtl8367d_cpu_aware,
++			 mb->rtl8367d_transparent,
++			 (u32)(ingress_rb & RTL8365MB_VLAN_INGRESS_MASK),
++			 mb->rtl8367d_egress_mode);
++
++		/* Standalone WAN ports do not receive a bridge STP transition.
++		 * Keep the explicitly designated WAN and CPU ports forwarding so
++		 * ordinary DHCP/IP traffic can reach the tag_8021q path. LAN user
++		 * ports remain under normal DSA bridge state management.
++		 */
++		rtl8365mb_port_stp_state_set(ds, cpu->trap_port,
++					     BR_STATE_FORWARDING);
++		rtl8365mb_port_stp_state_set(ds, mb->rtl8367d_wan_port,
++					     BR_STATE_FORWARDING);
++		dev_info(priv->dev,
++			 "RTL8367S-VB: standalone forwarding CPU port %u WAN port %u\n",
++			 cpu->trap_port, mb->rtl8367d_wan_port);
++
++		dsa_switch_for_each_available_port(dp, ds) {
++			regmap_read(priv->map,
++				    RTL8365MB_PORT_ISOLATION_REG(dp->index), &rb);
++			dev_info(priv->dev,
++				 "RTL8367S-VB: port %u isolation=0x%04x\n",
++				 dp->index, rb & RTL8365MB_PORT_ISOLATION_MASK);
++		}
++
++	}
++
+ 	ret = rtl83xx_setup_user_mdio(ds);
+ 	if (ret) {
+ 		dev_err(priv->dev, "could not set up MDIO bus\n");
+@@ -2571,6 +3184,10 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
+ 
+ 	return 0;
+ 
++out_unregister_8021q:
++	if (ds->tag_8021q_ctx)
++		dsa_tag_8021q_unregister(ds);
++
+ out_teardown_irq:
+ 	rtl8365mb_irq_teardown(priv);
+ 
+@@ -2583,6 +3200,12 @@ static void rtl8365mb_teardown(struct dsa_switch *ds)
+ 	struct realtek_priv *priv = ds->priv;
+ 
+ 	rtl8365mb_stats_teardown(priv);
++	if (rtl8367s_vb_use_8021q_tagging(priv) && ds->tag_8021q_ctx) {
++		rtnl_lock();
++		dsa_tag_8021q_unregister(ds);
++		rtnl_unlock();
++	}
++
+ 	rtl8365mb_irq_teardown(priv);
+ }
+ 
+@@ -2683,6 +3306,8 @@ static const struct dsa_switch_ops rtl8365mb_switch_ops = {
+ 	.port_vlan_add = rtl8365mb_port_vlan_add,
+ 	.port_vlan_del = rtl8365mb_port_vlan_del,
+ 	.port_vlan_filtering = rtl8365mb_port_vlan_filtering,
++	.tag_8021q_vlan_add = rtl8367s_vb_tag_8021q_vlan_add,
++	.tag_8021q_vlan_del = rtl8367s_vb_tag_8021q_vlan_del,
+ 	.get_strings = rtl8365mb_get_strings,
+ 	.get_ethtool_stats = rtl8365mb_get_ethtool_stats,
+ 	.get_sset_count = rtl8365mb_get_sset_count,
+diff --git a/drivers/net/dsa/realtek/rtl8365mb_vlan.c b/drivers/net/dsa/realtek/rtl8365mb_vlan.c
+index 64dd8d9..bbe3aa4 100644
+--- a/drivers/net/dsa/realtek/rtl8365mb_vlan.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_vlan.c
+@@ -48,6 +48,7 @@
+ 
+ #include "rtl8365mb_vlan.h"
+ #include "rtl8365mb_table.h"
++#include <linux/dsa/8021q.h>
+ #include <linux/if_bridge.h>
+ #include <linux/lockdep.h>
+ #include <linux/regmap.h>
+@@ -75,6 +76,10 @@
+ #define RTL8365MB_CVLAN_ENTRY_D2_METERIDX_EXT_MASK	GENMASK(6, 6)
+ #define   RTL8365MB_CVLAN_METERIDX_HI_MASK		GENMASK(5, 5)
+ 
++#define RTL8367D_CVLAN_ENTRY_SIZE			2
++#define RTL8367D_CVLAN_ENTRY_D1_FID_MASK		GENMASK(1, 0)
++#define RTL8367D_CVLAN_ENTRY_D1_IVL_SVL_MASK		BIT(3)
++
+ /* VLAN member configuration registers 0~31, u16[3] */
+ #define RTL8365MB_VLAN_MC_BASE				0x0728
+ #define RTL8365MB_VLAN_MC_ENTRY_SIZE			4 /* 64-bit */
+@@ -186,12 +191,17 @@ static int rtl8365mb_vlan_4k_read(struct realtek_priv *priv, u16 vid,
+ 				  struct rtl8365mb_vlan4k *vlan4k)
+ {
+ 	u16 data[RTL8365MB_CVLAN_ENTRY_SIZE];
++	size_t data_len = ARRAY_SIZE(data);
++	bool rtl8367d = rtl8367s_vb_uses_rtl8367d_vlan(priv);
+ 	int val;
+ 	int ret;
+ 
++	if (rtl8367d)
++		data_len = RTL8367D_CVLAN_ENTRY_SIZE;
++
+ 	ret = rtl8365mb_table_query(priv, RTL8365MB_TABLE_CVLAN,
+ 				    RTL8365MB_TABLE_OP_READ, &vid, 0, 0,
+-				    data, ARRAY_SIZE(data));
++				    data, data_len);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -201,11 +211,21 @@ static int rtl8365mb_vlan_4k_read(struct realtek_priv *priv, u16 vid,
+ 
+ 	val = FIELD_GET(RTL8365MB_CVLAN_ENTRY_D0_MBR_MASK, data[0]);
+ 	vlan4k->member = FIELD_PREP(RTL8365MB_CVLAN_MBR_LO_MASK, val);
+-	val = FIELD_GET(RTL8365MB_CVLAN_ENTRY_D2_MBR_EXT_MASK, data[2]);
+-	vlan4k->member |= FIELD_PREP(RTL8365MB_CVLAN_MBR_HI_MASK, val);
+ 
+ 	val = FIELD_GET(RTL8365MB_CVLAN_ENTRY_D0_UNTAG_MASK, data[0]);
+ 	vlan4k->untag = FIELD_PREP(RTL8365MB_CVLAN_UNTAG_LO_MASK, val);
++
++	if (rtl8367d) {
++		vlan4k->fid = FIELD_GET(RTL8367D_CVLAN_ENTRY_D1_FID_MASK,
++					 data[1]);
++		vlan4k->ivl_en = FIELD_GET(
++			RTL8367D_CVLAN_ENTRY_D1_IVL_SVL_MASK, data[1]);
++		return 0;
++	}
++
++	val = FIELD_GET(RTL8365MB_CVLAN_ENTRY_D2_MBR_EXT_MASK, data[2]);
++	vlan4k->member |= FIELD_PREP(RTL8365MB_CVLAN_MBR_HI_MASK, val);
++
+ 	val = FIELD_GET(RTL8365MB_CVLAN_ENTRY_D2_UNTAG_EXT_MASK, data[2]);
+ 	vlan4k->untag |= FIELD_PREP(RTL8365MB_CVLAN_UNTAG_HI_MASK, val);
+ 
+@@ -234,6 +254,7 @@ static int rtl8365mb_vlan_4k_write(struct realtek_priv *priv,
+ 				   const struct rtl8365mb_vlan4k *vlan4k)
+ {
+ 	u16 data[RTL8365MB_CVLAN_ENTRY_SIZE] = { 0 };
++	bool rtl8367d = rtl8367s_vb_uses_rtl8367d_vlan(priv);
+ 	u16 vid;
+ 	int val;
+ 
+@@ -244,6 +265,18 @@ static int rtl8365mb_vlan_4k_write(struct realtek_priv *priv,
+ 	val = FIELD_GET(RTL8365MB_CVLAN_UNTAG_LO_MASK, vlan4k->untag);
+ 	data[0] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D0_UNTAG_MASK, val);
+ 
++	if (rtl8367d) {
++		data[1] |= FIELD_PREP(RTL8367D_CVLAN_ENTRY_D1_FID_MASK,
++				      vlan4k->fid);
++		data[1] |= FIELD_PREP(RTL8367D_CVLAN_ENTRY_D1_IVL_SVL_MASK,
++				      vlan4k->ivl_en);
++		vid = vlan4k->vid;
++		return rtl8365mb_table_query(priv, RTL8365MB_TABLE_CVLAN,
++					     RTL8365MB_TABLE_OP_WRITE, &vid,
++					     0, 0, data,
++					     RTL8367D_CVLAN_ENTRY_SIZE);
++	}
++
+ 	data[1] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D1_FID_MASK, vlan4k->fid);
+ 	data[1] |= FIELD_PREP(RTL8365MB_CVLAN_ENTRY_D1_VBPEN_MASK,
+ 			      vlan4k->priority_en);
+@@ -284,6 +317,7 @@ rtl8365mb_vlan_4k_port_set(struct dsa_switch *ds, int port,
+ {
+ 	struct realtek_priv *priv = ds->priv;
+ 	struct rtl8365mb_vlan4k vlan4k = {0};
++	struct rtl8365mb_vlan4k readback = {0};
+ 	int ret;
+ 
+ 	dev_dbg(priv->dev, "%s VLAN %d 4K on port %d\n",
+@@ -319,6 +353,29 @@ rtl8365mb_vlan_4k_port_set(struct dsa_switch *ds, int port,
+ 		return ret;
+ 	}
+ 
++	ret = rtl8365mb_vlan_4k_read(priv, vlan->vid, &readback);
++	if (ret)
++		return ret;
++
++	/* Keep the private tag_8021q PVID alive across VLAN reloads. The
++	 * user-visible PVID is intentionally left untouched for VLAN-aware
++	 * bridges, where the bridge owns the ingress classification. */
++	if (rtl8367s_vb_uses_rtl8367d_vlan(priv)) {
++		struct dsa_port *dp = dsa_to_port(ds, port);
++
++		if (dsa_port_is_user(dp) && !dsa_port_is_vlan_filtering(dp)) {
++			ret = rtl8367s_vlan_port_set_direct_pvid(
++				priv, port, dsa_tag_8021q_standalone_vid(dp));
++			if (ret)
++				return ret;
++		}
++	}
++
++	dev_info(priv->dev,
++		 "RTL8367S-VB: VLAN4K VID %u port %d %s member=0x%03x untag=0x%03x ivl=%u\n",
++		 vlan->vid, port, include ? "add" : "del", readback.member,
++		 readback.untag, readback.ivl_en);
++
+ 	return 0;
+ }
+ 
+@@ -372,60 +429,145 @@ static int rtl8365mb_vlan_mc_read(struct realtek_priv *priv, u32 index,
+ 				  struct rtl8365mb_vlanmc *vlanmc)
+ {
+ 	u16 data[RTL8365MB_VLAN_MC_ENTRY_SIZE];
++	u32 val;
++	int i;
+ 	int ret;
+ 
+-	ret = regmap_bulk_read(priv->map, RTL8365MB_VLAN_MC_REG(index), &data,
+-			       RTL8365MB_VLAN_MC_ENTRY_SIZE);
+-	if (ret)
+-		return ret;
++	if (!rtl8367s_vb_uses_rtl8367d_vlan(priv)) {
++		ret = regmap_bulk_read(priv->map, RTL8365MB_VLAN_MC_REG(index),
++				       &data, RTL8365MB_VLAN_MC_ENTRY_SIZE);
++		if (ret)
++			return ret;
++		goto decode;
++	}
++
++	for (i = 0; i < RTL8365MB_VLAN_MC_ENTRY_SIZE; i++) {
++		ret = regmap_read(priv->map,
++				  RTL8365MB_VLAN_MC_REG(index) + i, &val);
++		if (ret)
++			return ret;
++		data[i] = val & 0xffff;
++	}
+ 
++decode:
+ 	vlanmc->member = FIELD_GET(RTL8365MB_VLAN_MC_D0_MBR_MASK, data[0]);
+ 	vlanmc->fid = FIELD_GET(RTL8365MB_VLAN_MC_D1_FID_MASK, data[1]);
+ 	vlanmc->meteridx = FIELD_GET(RTL8365MB_VLAN_MC_D2_METERIDX_MASK,
+-				     data[2]);
++					 data[2]);
+ 	vlanmc->policing_en = FIELD_GET(RTL8365MB_VLAN_MC_D2_ENVLANPOL_MASK,
+-					data[2]);
++						data[2]);
+ 	vlanmc->priority = FIELD_GET(RTL8365MB_VLAN_MC_D2_VBPRI_MASK, data[2]);
+ 	vlanmc->priority_en = FIELD_GET(RTL8365MB_VLAN_MC_D2_VBPEN_MASK,
+-					data[2]);
++						data[2]);
+ 	vlanmc->evid = FIELD_GET(RTL8365MB_VLAN_MC_D3_EVID_MASK, data[3]);
+ 
+ 	return 0;
+ }
+ 
+ static int rtl8365mb_vlan_mc_write(struct realtek_priv *priv, u32 index,
+-				   const struct rtl8365mb_vlanmc *vlanmc)
++					   const struct rtl8365mb_vlanmc *vlanmc)
+ {
+ 	u16 data[RTL8365MB_VLAN_MC_ENTRY_SIZE] = { 0 };
++	u32 readback[RTL8365MB_VLAN_MC_ENTRY_SIZE] = { 0 };
++	bool nonzero = false;
++	int i;
+ 	int ret;
+ 
+ 	data[0] |= FIELD_PREP(RTL8365MB_VLAN_MC_D0_MBR_MASK, vlanmc->member);
+ 	data[1] |= FIELD_PREP(RTL8365MB_VLAN_MC_D1_FID_MASK, vlanmc->fid);
+ 	data[2] |= FIELD_PREP(RTL8365MB_VLAN_MC_D2_METERIDX_MASK,
+-			      vlanmc->meteridx);
++				  vlanmc->meteridx);
+ 	data[2] |= FIELD_PREP(RTL8365MB_VLAN_MC_D2_ENVLANPOL_MASK,
+-			      vlanmc->policing_en);
++				  vlanmc->policing_en);
+ 	data[2] |=
+ 		FIELD_PREP(RTL8365MB_VLAN_MC_D2_VBPRI_MASK, vlanmc->priority);
+ 	data[2] |= FIELD_PREP(RTL8365MB_VLAN_MC_D2_VBPEN_MASK,
+-			      vlanmc->priority_en);
++				  vlanmc->priority_en);
+ 	data[3] |= FIELD_PREP(RTL8365MB_VLAN_MC_D3_EVID_MASK, vlanmc->evid);
+ 
+-	ret = regmap_bulk_write(priv->map, RTL8365MB_VLAN_MC_REG(index), &data,
+-				RTL8365MB_VLAN_MC_ENTRY_SIZE);
++	if (!rtl8367s_vb_uses_rtl8367d_vlan(priv))
++		return regmap_bulk_write(priv->map, RTL8365MB_VLAN_MC_REG(index),
++					 &data, RTL8365MB_VLAN_MC_ENTRY_SIZE);
+ 
+-	return ret;
++	for (i = 0; i < RTL8365MB_VLAN_MC_ENTRY_SIZE; i++) {
++		if (data[i])
++			nonzero = true;
++
++		ret = regmap_write(priv->map,
++				   RTL8365MB_VLAN_MC_REG(index) + i, data[i]);
++		if (ret)
++			return ret;
++	}
++
++	if (!nonzero)
++		return 0;
++
++	for (i = 0; i < RTL8365MB_VLAN_MC_ENTRY_SIZE; i++) {
++		ret = regmap_read(priv->map,
++				  RTL8365MB_VLAN_MC_REG(index) + i,
++				  &readback[i]);
++		if (ret)
++			return ret;
++	}
++
++	dev_info(priv->dev,
++		 "RTL8367S-VB: VLANMC[%u] wr=%04x/%04x/%04x/%04x rb=%04x/%04x/%04x/%04x\n",
++		 index, data[0], data[1], data[2], data[3],
++		 readback[0] & 0xffff, readback[1] & 0xffff,
++		 readback[2] & 0xffff, readback[3] & 0xffff);
++
++	return 0;
+ }
+ 
+ static int rtl8365mb_vlan_mc_erase(struct realtek_priv *priv, u32 index)
+ {
+ 	u16 data[RTL8365MB_VLAN_MC_ENTRY_SIZE] = { 0 };
++	int i;
+ 	int ret;
+ 
+-	ret = regmap_bulk_write(priv->map, RTL8365MB_VLAN_MC_REG(index), &data,
+-				RTL8365MB_VLAN_MC_ENTRY_SIZE);
++	if (!rtl8367s_vb_uses_rtl8367d_vlan(priv))
++		return regmap_bulk_write(priv->map, RTL8365MB_VLAN_MC_REG(index),
++					 &data, RTL8365MB_VLAN_MC_ENTRY_SIZE);
+ 
+-	return ret;
++	for (i = 0; i < RTL8365MB_VLAN_MC_ENTRY_SIZE; i++) {
++		ret = regmap_write(priv->map, RTL8365MB_VLAN_MC_REG(index) + i, 0);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++int rtl8365mb_vlan_mc_reset(struct realtek_priv *priv)
++{
++	int index;
++	int ret;
++	struct rtl8365mb_vlanmc neutral = { 0 };
++
++	/*
++	 * Boot firmware may leave all member configuration slots populated.
++	 * DSA owns the switch from this point and expects slot 0 to be the
++	 * neutral PVID entry and the remaining slots to be available.
++	 */
++	for (index = 0; index <= RTL8365MB_VLAN_MCMAX; index++) {
++		ret = rtl8365mb_vlan_mc_erase(priv, index);
++		if (ret)
++			return ret;
++	}
++
++	/*
++	 * Ports boot with PVID index 0 while they are standalone. The switch
++	 * still checks VLAN membership for that PVID even when ingress accepts
++	 * any frame type and VLAN filtering is disabled. Keep the neutral VID 0
++	 * entry permissive and let port isolation decide the actual forwarding
++	 * path.
++	 */
++	neutral.member = RTL8365MB_VLAN_MC_D0_MBR_MASK;
++	ret = rtl8365mb_vlan_mc_write(priv, 0, &neutral);
++	if (ret)
++		return ret;
++
++	return 0;
+ }
+ 
+ /*
+@@ -529,10 +671,11 @@ static
+ int rtl8365mb_vlan_mc_port_set(struct dsa_switch *ds, int port,
+ 			       u16 vid, bool pvid,
+ 			       struct netlink_ext_ack *extack,
+-			       bool include)
++			       bool include, u8 *used_idx)
+ {
+ 	struct realtek_priv *priv = ds->priv;
+ 	struct rtl8365mb_vlanmc vlanmc = {0};
++	struct dsa_port *dp;
+ 	u8 first_unused = 0;
+ 	u8 vlanmc_idx = 0;
+ 	int ret;
+@@ -593,10 +736,15 @@ int rtl8365mb_vlan_mc_port_set(struct dsa_switch *ds, int port,
+ 	/* here we either have an existing VLANMC (with PVID members) or the
+ 	 * added port is using this VLAN as PVID
+ 	 */
+-	if (include)
++	if (include) {
+ 		vlanmc.member |= BIT(port);
+-	else
++
++		if (rtl8367s_vb_uses_rtl8367d_vlan(priv))
++			dsa_switch_for_each_cpu_port(dp, ds)
++				vlanmc.member |= BIT(dp->index);
++	} else {
+ 		vlanmc.member &= ~BIT(port);
++	}
+ 
+ 	/* just like we don't need to create a VLAN_MC when there is no port
+ 	 * using it as PVID, we can erase it when there is no more port using
+@@ -618,6 +766,9 @@ int rtl8365mb_vlan_mc_port_set(struct dsa_switch *ds, int port,
+ 		return ret;
+ 	}
+ 
++	if (used_idx)
++		*used_idx = vlanmc_idx;
++
+ 	return 0;
+ }
+ 
+@@ -675,10 +826,22 @@ static int rtl8365mb_vlan_get_pvid_mc(struct realtek_priv *priv,
+  */
+ int rtl8365mb_vlan_port_get_pvid(struct realtek_priv *priv, int port, u16 *pvid)
+ {
++	u32 data;
+ 	struct rtl8365mb_vlanmc vlanmc;
+ 	u8 vlanmc_idx;
+ 	int ret;
+ 
++	if (rtl8367s_vb_uses_rtl8367d_vlan(priv)) {
++		ret = regmap_read(priv->map,
++				  RTL8365MB_VLAN_PVID_CTRL_BASE + port,
++				  &data);
++		if (ret)
++			return ret;
++
++		*pvid = data & GENMASK(11, 0);
++		return 0;
++	}
++
+ 	ret = rtl8365mb_vlan_get_pvid_mc(priv, port, &vlanmc_idx, &vlanmc);
+ 	if (ret)
+ 		return ret;
+@@ -748,6 +911,127 @@ rtl8365mb_vlan_port_set_framefilter(struct realtek_priv *priv,
+ 				  val);
+ }
+ 
++int rtl8367s_vlan_port_set_direct_pvid(struct realtek_priv *priv,
++					      int port, u16 vid)
++{
++	u32 rb = 0;
++	int ret;
++
++	/*
++	 * The vendor/swconfig RTL8367S path used 0x0700 + physical port as a
++	 * direct 12-bit PVID register. The common rtl8365mb path treats these
++	 * registers as paired VLANMC indexes, but VLANMC writes read back zero
++	 * on MR80X v5. Use the vendor-style direct PVID only from the guarded
++	 * RTL8367S-VB DSA 802.1Q setup.
++	 */
++	ret = regmap_update_bits(priv->map, RTL8365MB_VLAN_PVID_CTRL_BASE + port,
++				 GENMASK(11, 0), vid);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(priv->map, RTL8365MB_VLAN_PVID_CTRL_BASE + port, &rb);
++	if (ret)
++		return ret;
++
++	dev_info(priv->dev,
++		 "RTL8367S-VB: direct PVID port %d VID %u reg 0x%04x rb=0x%04x\n",
++		 port, vid, RTL8365MB_VLAN_PVID_CTRL_BASE + port,
++		 rb & 0xffff);
++
++	return 0;
++}
++
++int rtl8367s_vlan_tag_8021q_port_set_direct_pvid(struct dsa_switch *ds,
++						  int port, int cpu_port,
++						  u16 vid)
++{
++	struct switchdev_obj_port_vlan cpu_vlan = { 0 };
++	struct switchdev_obj_port_vlan user_vlan = { 0 };
++	struct realtek_priv *priv = ds->priv;
++	int ret;
++
++	lockdep_assert_held(&priv->vlan_lock);
++
++	ret = rtl8367s_vlan_port_set_direct_pvid(priv, port, vid);
++	if (ret)
++		return ret;
++
++	ret = rtl8365mb_vlan_port_set_framefilter(priv, port,
++						  RTL8365MB_FRAME_TYPE_ANY_FRAME);
++	if (ret)
++		return ret;
++
++	user_vlan.vid = vid;
++	user_vlan.flags = BRIDGE_VLAN_INFO_UNTAGGED |
++			  BRIDGE_VLAN_INFO_PVID;
++	ret = rtl8365mb_vlan_4k_port_add(ds, port, &user_vlan, NULL);
++	if (ret)
++		return ret;
++
++	cpu_vlan.vid = vid;
++	cpu_vlan.flags = 0;
++	ret = rtl8365mb_vlan_4k_port_add(ds, cpu_port, &cpu_vlan, NULL);
++	if (ret)
++		return ret;
++
++	dev_info(priv->dev,
++		 "RTL8367S-VB: 802.1Q user port %d uses direct VID %u with CPU port %d\n",
++		 port, vid, cpu_port);
++
++	return 0;
++}
++
++int rtl8367s_vlan_tag_8021q_port_add(struct dsa_switch *ds, int port,
++				     int cpu_port, u16 vid, u16 flags)
++{
++	struct switchdev_obj_port_vlan cpu_vlan = { 0 };
++	struct switchdev_obj_port_vlan user_vlan = { 0 };
++	struct realtek_priv *priv = ds->priv;
++	int ret;
++
++	lockdep_assert_held(&priv->vlan_lock);
++
++	if (flags & BRIDGE_VLAN_INFO_PVID) {
++		ret = rtl8367s_vlan_tag_8021q_port_set_direct_pvid(ds, port,
++								   cpu_port,
++								   vid);
++		if (ret)
++			return ret;
++	} else {
++		user_vlan.vid = vid;
++		user_vlan.flags = flags;
++		ret = rtl8365mb_vlan_4k_port_add(ds, port, &user_vlan, NULL);
++		if (ret)
++			return ret;
++
++		cpu_vlan.vid = vid;
++		cpu_vlan.flags = 0;
++		ret = rtl8365mb_vlan_4k_port_add(ds, cpu_port, &cpu_vlan, NULL);
++		if (ret)
++			return ret;
++	}
++
++	dev_info(priv->dev,
++		 "RTL8367S-VB: RTL8367D tag_8021q VID %u user port %d CPU port %d flags=0x%x\n",
++		 vid, port, cpu_port, flags);
++
++	return 0;
++}
++
++int rtl8367s_vlan_tag_8021q_port_del(struct dsa_switch *ds, int port,
++				     u16 vid)
++{
++	struct switchdev_obj_port_vlan vlan = { 0 };
++	struct realtek_priv *priv = ds->priv;
++
++	lockdep_assert_held(&priv->vlan_lock);
++
++	vlan.vid = vid;
++	vlan.flags = 0;
++
++	return rtl8365mb_vlan_4k_port_del(ds, port, &vlan);
++}
++
+ /*
+  * rtl8365mb_vlan_pvid_port_set() - Configure a port's PVID and associated
+  * VLANMC entry
+@@ -770,13 +1054,26 @@ int rtl8365mb_vlan_pvid_port_set(struct dsa_switch *ds, int port, u16 vid,
+ 	enum rtl8365mb_frame_ingress accepted_frame, prev_accepted_frame;
+ 	struct realtek_priv *priv = ds->priv;
+ 	struct rtl8365mb_vlanmc prev_vlanmc = {0};
+-	u8 _unused_first_free_idx;
+ 	u8 prev_vlanmc_idx;
+ 	u8 vlanmc_idx;
+ 	int ret;
+ 
+ 	lockdep_assert_held(&priv->vlan_lock);
+ 
++	/* A VLAN-aware bridge needs its user-visible PVID on ingress. The
++	 * tagger can then identify the designated bridge port from that VID.
++	 * Outside VLAN filtering, retain the private source-port VID.
++	 */
++	if (rtl8367s_vb_uses_rtl8367d_vlan(priv)) {
++		if (!dsa_port_is_vlan_filtering(dsa_to_port(ds, port)))
++			return 0;
++
++		return rtl8367s_vlan_tag_8021q_port_set_direct_pvid(ds, port,
++								     dsa_upstream_port(ds,
++										       port),
++								     vid);
++	}
++
+ 	/* Read the old PVID exclusively to undo in case of error */
+ 	ret = rtl8365mb_vlan_get_pvid_mc(priv, port, &prev_vlanmc_idx,
+ 					 &prev_vlanmc);
+@@ -795,18 +1092,11 @@ int rtl8365mb_vlan_pvid_port_set(struct dsa_switch *ds, int port, u16 vid,
+ 	/* Find or allocate a new vlan MC and add port to members,
+ 	 * although members are not checked by the HW in vlan MC.
+ 	 */
+-	ret = rtl8365mb_vlan_mc_port_set(ds, port, vid, true, extack, true);
++	ret = rtl8365mb_vlan_mc_port_set(ds, port, vid, true, extack, true,
++					 &vlanmc_idx);
+ 	if (ret)
+ 		return ret;
+ 
+-	/* look for existing entry */
+-	ret = rtl8365mb_vlan_mc_find(priv, vid, &vlanmc_idx,
+-				     &_unused_first_free_idx);
+-	if (ret) {
+-		dev_err(priv->dev, "Failed to find a VLAN MC table index\n");
+-		goto undo_vlan_mc_port_set;
+-	}
+-
+ 	if (!vlanmc_idx) {
+ 		dev_err(priv->dev, "VLAN should already exist in VLAN MC\n");
+ 		ret = -ENOENT;
+@@ -832,7 +1122,7 @@ int rtl8365mb_vlan_pvid_port_set(struct dsa_switch *ds, int port, u16 vid,
+ 	 */
+ 	if (prev_vlanmc_idx && (prev_vlanmc.evid != vid)) {
+ 		ret = rtl8365mb_vlan_mc_port_set(ds, port, prev_vlanmc.evid,
+-						 false, NULL, false);
++						 false, NULL, false, NULL);
+ 		if (ret) {
+ 			dev_err(priv->dev, "Failed to clear old VLAN MC\n");
+ 			goto undo_set_framefilter;
+@@ -851,7 +1141,7 @@ undo_vlan_port_set_pvid:
+ undo_vlan_mc_port_set:
+ 	if (prev_vlanmc.evid != vid)
+ 		(void)rtl8365mb_vlan_mc_port_set(ds, port, vid, false, NULL,
+-						 false);
++						 false, NULL);
+ 
+ 	return ret;
+ }
+@@ -879,6 +1169,24 @@ int rtl8365mb_vlan_pvid_port_clear(struct dsa_switch *ds, int port, u16 vid)
+ 
+ 	lockdep_assert_held(&priv->vlan_lock);
+ 
++	/* Restore the private source-port VID when a bridge PVID is removed.
++	 * This also repairs the standalone path after VLAN filtering is turned
++	 * off, without using the packed VLANMC registers on RTL8367D.
++	 */
++	if (rtl8367s_vb_uses_rtl8367d_vlan(priv)) {
++		struct dsa_port *dp = dsa_to_port(ds, port);
++		u16 current_pvid;
++
++		ret = rtl8365mb_vlan_port_get_pvid(priv, port, &current_pvid);
++		if (ret || current_pvid != vid)
++			return ret;
++
++		return rtl8367s_vlan_tag_8021q_port_set_direct_pvid(ds, port,
++								     dsa_upstream_port(ds,
++										       port),
++								     dsa_tag_8021q_standalone_vid(dp));
++	}
++
+ 	ret = rtl8365mb_vlan_get_pvid_mc(priv, port, &vlanmc_idx,
+ 					 &vlanmc);
+ 	if (ret) {
+@@ -926,7 +1234,7 @@ int rtl8365mb_vlan_pvid_port_clear(struct dsa_switch *ds, int port, u16 vid)
+ 
+ 	/* Clears the VLAN MC membership and maybe VLAN MC entry if empty */
+ 	ret = rtl8365mb_vlan_mc_port_set(ds, port, vlanmc.evid,
+-					 false, NULL, false);
++					 false, NULL, false, NULL);
+ 	if (ret)
+ 		goto undo_port_set_pvid;
+ 
+diff --git a/drivers/net/dsa/realtek/rtl8365mb_vlan.h b/drivers/net/dsa/realtek/rtl8365mb_vlan.h
+index 27a526b..a4469ab 100644
+--- a/drivers/net/dsa/realtek/rtl8365mb_vlan.h
++++ b/drivers/net/dsa/realtek/rtl8365mb_vlan.h
+@@ -18,6 +18,10 @@ enum rtl8365mb_frame_ingress {
+ 	RTL8365MB_FRAME_TYPE_UNTAGGED_ONLY,
+ };
+ 
++bool rtl8367s_vb_uses_rtl8367d_vlan(struct realtek_priv *priv);
++int rtl8367s_vlan_port_set_direct_pvid(struct realtek_priv *priv,
++						 int port, u16 vid);
++
+ int rtl8365mb_vlan_port_get_pvid(struct realtek_priv *priv, int port,
+ 				 u16 *pvid);
+ int
+@@ -28,11 +32,19 @@ int
+ rtl8365mb_vlan_port_set_framefilter(struct realtek_priv *priv,
+ 				    int port,
+ 				    enum rtl8365mb_frame_ingress frame_type);
++int rtl8365mb_vlan_mc_reset(struct realtek_priv *priv);
+ int rtl8365mb_vlan_4k_port_add(struct dsa_switch *ds, int port,
+ 			       const struct switchdev_obj_port_vlan *vlan,
+ 			       struct netlink_ext_ack *extack);
+ int rtl8365mb_vlan_4k_port_del(struct dsa_switch *ds, int port,
+ 			       const struct switchdev_obj_port_vlan *vlan);
++int rtl8367s_vlan_tag_8021q_port_set_direct_pvid(struct dsa_switch *ds,
++						  int port, int cpu_port,
++						  u16 vid);
++int rtl8367s_vlan_tag_8021q_port_add(struct dsa_switch *ds, int port,
++				     int cpu_port, u16 vid, u16 flags);
++int rtl8367s_vlan_tag_8021q_port_del(struct dsa_switch *ds, int port,
++				     u16 vid);
+ int rtl8365mb_vlan_pvid_port_set(struct dsa_switch *ds, int port, u16 vid,
+ 				 struct netlink_ext_ack *extack);
+ int rtl8365mb_vlan_pvid_port_clear(struct dsa_switch *ds, int port, u16 vid);

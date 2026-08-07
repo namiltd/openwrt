@@ -73,6 +73,13 @@ properties:
     description:
       A reference to an optional PCS PHY device (GMAC1 <-> UNIPHY PCS)
 
+  qcom,gmac-flow-control:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: |
+      Optional value written to the IPQ5018 GMAC flow-control register when
+      the link speed is configured. Omit this property to retain the normal
+      stmmac flow-control setup.
+
 required:
   - compatible
   - clocks
