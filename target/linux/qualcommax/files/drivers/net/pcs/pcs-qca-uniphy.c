@@ -500,7 +500,8 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 		misc2_phy_mode = UNIPHY_MISC2_SGMIIPLUS;
 		mode_ctrl = UNIPHY_SGPLUS_MODE;
 		mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M, UNIPHY_CH0_MODE_MAC);
-		mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
+		if (neg_mode == PHYLINK_PCS_NEG_INBAND_ENABLED)
+			mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
 		break;
 	default:
 		return -EINVAL;
@@ -538,11 +539,17 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 
 	/* TODO: Fix for IPQ6018 and IPQ8074 */
 	if (uniphy->data->uniphy_type == UNIPHY_IPQ5018) {
-		//set force mode for fixed link
-		if (neg_mode == PHYLINK_PCS_NEG_OUTBAND && !phylink_expects_phy(pcs->phylink)) {
+		/* SGMII+ uses channel AN even when phylink has a fixed link. */
+		if (neg_mode == PHYLINK_PCS_NEG_OUTBAND &&
+		    !phylink_expects_phy(pcs->phylink) &&
+		    interface != PHY_INTERFACE_MODE_2500BASEX) {
 			regmap_set_bits(uniphy->regmap,
 					UNIPHY_CH_CTRL(upcs->channel),
 					UNIPHY_CH_FORCE_MODE);
+		} else if (interface == PHY_INTERFACE_MODE_2500BASEX) {
+			regmap_clear_bits(uniphy->regmap,
+					  UNIPHY_CH_CTRL(upcs->channel),
+					  UNIPHY_CH_FORCE_MODE);
 		}
 	}
 

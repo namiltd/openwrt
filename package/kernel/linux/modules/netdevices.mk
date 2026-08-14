@@ -968,6 +968,23 @@ endef
 $(eval $(call KernelPackage,dsa-rtl8365mb))
 
 
+define KernelPackage/dsa-rtl8367d
+  SUBMENU:=$(NETWORK_DEVICES_MENU)
+  TITLE:=Realtek RTL8367D switch DSA support
+  DEPENDS:=+kmod-dsa-rtl8365mb
+  CONFLICTS:=kmod-dsa-vsc73xx
+  KCONFIG:=CONFIG_NET_DSA_TAG_VSC73XX_8021Q
+  FILES:=$(LINUX_DIR)/net/dsa/tag_vsc73xx_8021q.ko
+endef
+
+define KernelPackage/dsa-rtl8367d/description
+  Dependency package for RTL8367D switches using the optional 802.1Q DSA
+  datapath. The datapath still requires an explicit Device Tree property.
+endef
+
+$(eval $(call KernelPackage,dsa-rtl8367d))
+
+
 define KernelPackage/dsa-ks8995
   SUBMENU:=$(NETWORK_DEVICES_MENU)
   TITLE:=Micrel/Kendin KS8995 Ethernet DSA Switch

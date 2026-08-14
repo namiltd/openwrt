@@ -1,0 +1,146 @@
+From 7f9c8d5225af2f9a2dc97e857cf4bc43d0c5f001 Mon Sep 17 00:00:00 2001
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Date: Wed, 15 Jul 2026 13:20:00 -0300
+Subject: [PATCH] wifi: ath11k: support calibration data from nvmem
+
+Prefer calibration data from a DT-described nvmem cell. Boards without
+that cell retain the existing firmware-file and hotplug fallback.
+
+The optional qcom,ath11k-calibration-needs-macflag property applies the
+legacy IPQ5018 calibration flag adjustment in memory, allowing migrated
+boards to remove their userspace caldata extraction case.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+---
+
+diff --git a/drivers/net/wireless/ath/ath11k/qmi.c b/drivers/net/wireless/ath/ath11k/qmi.c
+index 3ffb772..361491e 100644
+--- a/drivers/net/wireless/ath/ath11k/qmi.c
++++ b/drivers/net/wireless/ath/ath11k/qmi.c
+@@ -10,6 +10,7 @@
+ #include "core.h"
+ #include "debug.h"
+ #include "hif.h"
++#include <linux/nvmem-consumer.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
+ #include <linux/ioport.h>
+@@ -2413,12 +2421,91 @@ err_free_req:
+ 	return ret;
+ }
+ 
++static int ath11k_qmi_load_caldata_nvmem(struct ath11k_base *ab)
++{
++	struct device_node *np = ab->dev->of_node;
++	struct nvmem_cell *cell;
++	u8 *buf;
++	size_t len;
++	u32 fw_size;
++	int ret;
++
++	if (!np || of_property_match_string(np, "nvmem-cell-names",
++					    "calibration") < 0)
++		return -ENOENT;
++
++	cell = of_nvmem_cell_get(np, "calibration");
++	if (IS_ERR(cell)) {
++		ret = PTR_ERR(cell);
++		if (ret != -EPROBE_DEFER)
++			ath11k_warn(ab,
++				    "failed to get calibration nvmem-cell: %d\n",
++				    ret);
++		return ret;
++	}
++
++	buf = nvmem_cell_read(cell, &len);
++	if (IS_ERR(buf)) {
++		ret = PTR_ERR(buf);
++		ath11k_warn(ab, "failed to read calibration nvmem-cell: %d\n",
++			    ret);
++		nvmem_cell_put(cell);
++		return ret;
++	}
++
++	if (!len || len > ab->hw_params.fw.board_size) {
++		ath11k_warn(ab, "invalid calibration nvmem-cell length: %zu\n",
++			    len);
++		ret = -EMSGSIZE;
++		goto out;
++	}
++
++	fw_size = len;
++	if (of_property_read_bool(np,
++				  "qcom,ath11k-calibration-needs-macflag")) {
++		u16 old_flag, new_flag = 0x0100, checksum;
++
++		if (fw_size < 0x40) {
++			ret = -EINVAL;
++			goto out;
++		}
++
++		old_flag = (buf[0x3e] << 8) | buf[0x3f];
++		if (old_flag != new_flag) {
++			checksum = (buf[0x0a] << 8) | buf[0x0b];
++			checksum ^= old_flag ^ new_flag;
++			buf[0x3e] = new_flag >> 8;
++			buf[0x3f] = new_flag & 0xff;
++			buf[0x0a] = checksum >> 8;
++			buf[0x0b] = checksum & 0xff;
++		}
++	}
++
++	ret = ath11k_qmi_load_file_target_mem(ab, buf, fw_size,
++					      ATH11K_QMI_FILE_TYPE_CALDATA);
++	if (ret > 0)
++		ret = 0;
++	if (ret)
++		ath11k_warn(ab,
++			    "failed to load calibration from nvmem-cell: %d\n",
++			    ret);
++	else
++		ath11k_dbg(ab, ATH11K_DBG_QMI,
++			   "loaded calibration from nvmem-cell (%zu bytes)\n",
++			   len);
++
++out:
++	kfree(buf);
++	nvmem_cell_put(cell);
++	return ret;
++}
++
+ static int ath11k_qmi_load_bdf_qmi(struct ath11k_base *ab,
+ 				   bool regdb)
+ {
+ 	struct device *dev = ab->dev;
+ 	char filename[ATH11K_QMI_MAX_BDF_FILE_NAME_SIZE];
+-	const struct firmware *fw_entry;
++	const struct firmware *fw_entry = NULL;
+ 	struct ath11k_board_data bd;
+ 	u32 fw_size, file_type;
+ 	int ret = 0, bdf_type;
+@@ -2465,6 +2552,16 @@ static int ath11k_qmi_load_bdf_qmi(struct ath11k_base *ab,
+ 	} else {
+ 		file_type = ATH11K_QMI_FILE_TYPE_CALDATA;
+ 
++		ret = ath11k_qmi_load_caldata_nvmem(ab);
++		if (!ret)
++			goto out_qmi_cal;
++		if (ret == -EPROBE_DEFER)
++			goto out;
++		if (ret != -ENOENT)
++			ath11k_warn(ab,
++				    "calibration nvmem load failed (%d), falling back to firmware files\n",
++				    ret);
++
+ 		/* cal-<bus>-<id>.bin */
+ 		snprintf(filename, sizeof(filename), "cal-%s-%s.bin",
+ 			 ath11k_bus_str(ab->hif.bus), dev_name(dev));
+@@ -2502,7 +2599,7 @@ success:
+ 	ath11k_dbg(ab, ATH11K_DBG_QMI, "caldata type: %u\n", file_type);
+ 
+ out_qmi_cal:
+-	if (!ab->qmi.target.eeprom_caldata)
++	if (fw_entry)
+ 		release_firmware(fw_entry);
+ out:
+ 	ath11k_core_free_bdf(ab, &bd);

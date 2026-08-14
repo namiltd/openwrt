@@ -52,6 +52,25 @@ remove_oem_ubi_volume() {
 	fi
 }
 
+mercusys_mr80x_v5_do_upgrade() {
+	# This U-Boot reliably boots the primary rootfs partition. Switching
+	# tp_boot_idx to the alternate rootfs_1 path makes bootipq hit a data abort.
+	#
+	# Reuse the dormant rootfs_1 slot as the OpenWrt data UBI, following the
+	# same split-root/data idea used by boards like the Xiaomi AX3600, but
+	# without changing the boot path away from the known-good primary rootfs.
+	CI_UBIPART="rootfs"
+	CI_ROOT_UBIPART="rootfs"
+	CI_DATA_UBIPART="rootfs_1"
+
+	fw_setenv -s - <<-EOF || nand_do_upgrade_failed
+		tp_boot_idx 0
+	EOF
+
+	remove_oem_ubi_volume ubi_rootfs
+	nand_do_upgrade "$1"
+}
+
 linksys_bootconfig_set_primaryboot() {
 	local partname=$1
 	local tempfile
@@ -212,6 +231,9 @@ platform_do_upgrade() {
 		linksys_bootconfig_pre_upgrade "$1"
 		remove_oem_ubi_volume ubi_rootfs
 		nand_do_upgrade "$1"
+		;;
+	mercusys,mr80x-v5)
+		mercusys_mr80x_v5_do_upgrade "$1"
 		;;
 	xiaomi,ax6000|\
 	xiaomi,redmi-ax5400)

@@ -1,0 +1,33 @@
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Subject: [PATCH] dt-bindings: wifi: ath11k: document OpenWrt extensions
+
+Document the opt-in calibration MAC flag and low-memory datapath profile
+used by memory-constrained ath11k boards.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+
+diff --git a/Documentation/devicetree/bindings/net/wireless/qcom,ath11k.yaml b/Documentation/devicetree/bindings/net/wireless/qcom,ath11k.yaml
+index 0c73329..4b47337 100644
+--- a/Documentation/devicetree/bindings/net/wireless/qcom,ath11k.yaml
++++ b/Documentation/devicetree/bindings/net/wireless/qcom,ath11k.yaml
+@@ -49,6 +49,20 @@ properties:
+       string to uniquely identify variant of the calibration data in the
+       board-2.bin for designs with colliding bus and device specific ids
+ 
++  qcom,ath11k-calibration-needs-macflag:
++    type: boolean
++    description:
++      Adjust the legacy IPQ5018 calibration MAC flag and checksum after
++      reading the calibration NVMEM cell. Boards without this property use
++      the cell contents unchanged.
++
++  qcom,ath11k-low-memory-datapath:
++    type: boolean
++    description:
++      Use reduced primary RX, monitor buffer, and monitor destination ring
++      sizes to preserve RAM on memory-constrained devices. Boards without
++      this property retain the default datapath ring sizes.
++
+   memory-region:
+     minItems: 1
+     maxItems: 2

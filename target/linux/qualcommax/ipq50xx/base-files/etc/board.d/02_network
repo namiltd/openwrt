@@ -14,6 +14,13 @@ ipq50xx_setup_interfaces()
 	zyxel,scr50axe)
 		ucidef_set_interfaces_lan_wan "lan1 lan2 lan3 lan4" "wan"
 		;;
+	mercusys,mr80x-v5)
+		ucidef_set_interfaces_lan_wan "lan1 lan2 lan3" "wan"
+		ucidef_set_network_device_conduit "lan1" "eth0"
+		ucidef_set_network_device_conduit "lan2" "eth0"
+		ucidef_set_network_device_conduit "lan3" "eth0"
+		ucidef_set_network_device_conduit "wan" "wan"
+		;;
 	glinet,gl-b3000)
 		ucidef_set_interfaces_lan_wan "lan1 lan2" "wan"
 		;;
