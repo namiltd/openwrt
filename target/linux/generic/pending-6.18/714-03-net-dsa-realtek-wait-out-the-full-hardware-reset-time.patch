@@ -1,0 +1,54 @@
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Subject: [PATCH] net: dsa: realtek: wait out the full hardware reset time after GPIO deassert
+
+`714-01-net-dsa-rtl8365mb-wait-out-full-chip-reset.patch` already
+established, from Realtek's own documentation, that this chip family
+needs close to a full second to complete its internal bring-up after a
+reset - that patch fixed the *software* reset path
+(`rtl8365mb_reset_chip()`, `RTL8365MB_CHIP_RESET_REG`).
+
+`rtl83xx_probe()` performs a separate, earlier *hardware* reset via the
+optional `reset`/`reset-gpios` line, and only waits
+`REALTEK_HW_START_DELAY` (100 ms) after deasserting it before returning
+- an order of magnitude short of the same chip's documented bring-up
+time. On a board whose switch is reset by this GPIO path (as opposed to
+relying solely on the register-based reset), the very first MDIO access
+in `priv->ops->detect()` can land before the chip's internal state
+machine is actually ready, intermittently.
+
+Measured on a Mercusys MR80X v5 (RTL8367S-VB, GPIO-reset via
+`reset-gpios`): after a rapid sequence of driver unbind/rebind and
+warm-reboot cycles, a subsequent boot occasionally came up with the
+switch seemingly detected (chip ID read succeeds) but the CPU-facing
+conduit never receiving anything from it - unbinding and rebinding the
+MDIO device (which re-runs this same GPIO reset sequence, this time
+with an operator-inserted multi-second gap before rebind) reliably
+recovered it. That gap accidentally standing in for a missing hardware
+wait is a symptom of the real bug: `REALTEK_HW_START_DELAY` is too
+short, not that the driver needs a manual unbind/rebind workflow.
+
+Raise it to 1000 ms, matching the bring-up time this same driver
+already treats as authoritative for the register-based reset path in
+`714-01`. `REALTEK_HW_STOP_DELAY` (the reset-asserted hold time) is
+unrelated to bring-up and is left unchanged.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+---
+--- a/drivers/net/dsa/realtek/realtek.h
++++ b/drivers/net/dsa/realtek/realtek.h
+@@ -14,7 +14,14 @@
+ #include <linux/reset.h>
+ 
+ #define REALTEK_HW_STOP_DELAY		25	/* msecs */
+-#define REALTEK_HW_START_DELAY		100	/* msecs */
++/* Same bring-up time 714-01-net-dsa-rtl8365mb-wait-out-full-chip-reset.patch
++ * already established as authoritative for the register-based reset path,
++ * from Realtek's own documentation: the chip needs close to a full second
++ * to complete its internal bring-up after any reset, hardware or software.
++ * 100 ms here was intermittently too short and could leave detect() racing
++ * the chip's own internal state machine.
++ */
++#define REALTEK_HW_START_DELAY		1000	/* msecs */
+ 
+ struct phylink_mac_ops;
+ struct realtek_ops;

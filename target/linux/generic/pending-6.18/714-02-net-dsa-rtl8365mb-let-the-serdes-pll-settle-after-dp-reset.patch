@@ -1,0 +1,50 @@
+From: Stanislaw Pal <kuncy7@gmail.com>
+Date: Fri, 31 Jul 2026 14:00:00 +0200
+Subject: [PATCH] net: dsa: rtl8365mb: let the SerDes PLL settle after the data-path reset
+
+The vendor DW8051 firmware waits ~98 ms after the BMCR data-path reset
+(constant SGMII_TIMEOUT_98MS in Sgmii_Init[]) before any further SerDes
+register access, giving the SerDes PLL and analog front-end time to
+settle. Without the wait the SGMII link on the RTL8367S can come up
+half-alive on cold boot: carrier up and RX passing traffic, TX
+permanently dead (measured on a TP-Link Archer AX55 v1, IPQ5018).
+
+Suggested-by: mietekn (OpenWrt forum, reduce-number-of-drivers-for-rtl8367s #72/#106)
+Signed-off-by: Stanislaw Pal <kuncy7@gmail.com>
+
+Adapted to skip family D (RTL8367S-VB): that family takes a dedicated
+SerDes setup path (rtl8367d_pcs_config(), reached by an early return a
+little further down in rtl8365mb_pcs_config()) with its own timing.
+Inserting this wait ahead of that branch was measured, on the Mercusys
+MR80X v5 (RTL8367S-VB, family D SDS13 tuning), to leave the CPU port
+receiving nothing from the switch - carrier and TX fine, RX stuck at
+zero packets on the conduit for the whole uptime - while family C
+boards (this fix's original target) are unaffected either way, since
+they never reach this code path at all for family D. Gating the wait on
+family keeps the original fix intact for family C and avoids the
+regression on family D.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+---
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -1405,6 +1405,19 @@ static int rtl8365mb_pcs_config(struct p
+ 	if (ret)
+ 		return ret;
+ 
++	if (rtl8365mb_get_family(priv) != RTL8365MB_FAMILY_D) {
++		/* The vendor DW8051 firmware waits ~98 ms after the data-path
++		 * reset (SGMII_TIMEOUT_98MS in Sgmii_Init[]) for the SerDes PLL
++		 * and analog front-end to settle before any further SerDes
++		 * register access. Without the wait the link can come up
++		 * half-alive on cold boot: carrier and RX fine, TX permanently
++		 * dead. Family D takes its own dedicated SerDes setup path
++		 * (see the early return to rtl8367d_pcs_config() below) with
++		 * its own timing, so it is skipped here.
++		 */
++		usleep_range(98000, 98500);
++	}
++
+ 	/* Keep SGMII in-band autonegotiation disabled: the link parameters are
+ 	 * forced from rtl8365mb_pcs_link_up() instead.
+ 	 */
