@@ -1,0 +1,31 @@
+#!/bin/sh /etc/rc.common
+# Generic one-shot reboot trigger for uci-defaults first-boot migration
+# scripts that need a reboot to take effect but can't call `reboot`
+# directly from inside /etc/init.d/boot's uci_apply_defaults loop -
+# doing so would kill that loop mid-run, before its own `uci commit`
+# and `rm -f $applied`, which would make every uci-defaults script that
+# already ran earlier this same boot re-run again on the next one.
+#
+# Usage from a uci-defaults script: after doing whatever change needs
+# the reboot, `touch /tmp/migrate_reboot_pending` and exit normally
+# instead of calling `reboot`. This script (START=13, early in the
+# next init.d pass, after boot has fully committed) picks the flag up
+# and reboots once.
+#
+# Currently used by:
+#   - Mercusys MR80X v2/v5: uci-defaults/90_qcom-mibib-migrate-unified-layout
+#     (MIBIB profile switch to the unified rootfs layout - the kernel
+#     only sees the resulting larger "rootfs" MTD partition after
+#     re-reading the SMEM partition table at boot)
+#
+# Add new consumers to this list when wiring up another board's
+# migration script to the same flag file.
+
+START=13
+
+start() {
+	[ -f /tmp/migrate_reboot_pending ] || return 0
+	rm -f /tmp/migrate_reboot_pending
+	sync
+	reboot
+}
