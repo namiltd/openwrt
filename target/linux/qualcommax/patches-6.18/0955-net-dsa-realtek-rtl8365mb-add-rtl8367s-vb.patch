@@ -1,0 +1,113 @@
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Subject: [PATCH] net: dsa: realtek: add RTL8367S-VB support
+
+The Mercusys MR80X v5 contains an RTL8367S-VB reporting chip ID 0x6642
+and revision 0x0010. Its external interface layout matches the RTL8367S:
+interface 1 on port 6 is the SerDes interface used for 2500base-x, and
+interface 2 on port 7 supports the conventional MII-family modes.
+
+The generic RTL8365MB driver already contains the RTL8367S SGMII/HSGMII
+PCS implementation and vendor-derived SerDes tuning. Add the chip
+identity so this board can use that maintained common path, and classify
+it as its own register family ("family D"): the RTL8367S-VB has a
+distinct register layout despite sharing the rtl8365mb driver family,
+which is the prerequisite for the family-specific VLAN and link
+programming fixes carried in the following patch.
+
+Based-on: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+---
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -692,6 +692,7 @@
+  * @name: human-readable chip name
+  * @chip_id: chip identifier
+  * @chip_ver: chip silicon revision
++ * @family: chip register family
+  * @extints: available external interfaces
+  * @jam_table: chip-specific initialization jam table
+  * @jam_size: size of the chip's jam table
+@@ -704,6 +705,7 @@
+ 	const char *name;
+ 	u32 chip_id;
+ 	u32 chip_ver;
++	enum rtl8365mb_family family;
+ 	const struct rtl8365mb_extint extints[RTL8365MB_MAX_NUM_EXTINTS];
+ 	const struct rtl8365mb_jam_tbl_entry *jam_table;
+ 	size_t jam_size;
+@@ -716,6 +718,7 @@
+ 		.name = "RTL8365MB-VC",
+ 		.chip_id = 0x6367,
+ 		.chip_ver = 0x0040,
++		.family = RTL8365MB_FAMILY_C,
+ 		.extints = {
+ 			{ 6, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
+ 				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+@@ -727,6 +730,7 @@
+ 		.name = "RTL8367S",
+ 		.chip_id = 0x6367,
+ 		.chip_ver = 0x00A0,
++		.family = RTL8365MB_FAMILY_C,
+ 		.extints = {
+ 			{ 6, 1, PHY_INTF(SGMII) | PHY_INTF(HSGMII) },
+ 			{ 7, 2, PHY_INTF(MII) | PHY_INTF(TMII) |
+@@ -736,9 +740,23 @@
+ 		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
+ 	},
+ 	{
++		.name = "RTL8367S-VB",
++		.chip_id = 0x6642,
++		.chip_ver = 0x0010,
++		.family = RTL8365MB_FAMILY_D,
++		.extints = {
++			{ 6, 0, PHY_INTF(SGMII) | PHY_INTF(HSGMII) },
++			{ 7, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
++				PHY_INTF(RMII) | PHY_INTF(RGMII) },
++		},
++		.jam_table = rtl8365mb_init_jam_8365mb_vc,
++		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
++	},
++	{
+ 		.name = "RTL8367SB",
+ 		.chip_id = 0x6367,
+ 		.chip_ver = 0x0010,
++		.family = RTL8365MB_FAMILY_C,
+ 		.extints = {
+ 			{ 6, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
+ 				PHY_INTF(RMII) | PHY_INTF(RGMII) |
+@@ -753,6 +771,7 @@
+ 		.name = "RTL8367RB-VB",
+ 		.chip_id = 0x6367,
+ 		.chip_ver = 0x0020,
++		.family = RTL8365MB_FAMILY_C,
+ 		.extints = {
+ 			{ 6, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
+ 				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+@@ -857,6 +876,12 @@
+ 	bool sds_supported;
+ };
+ 
++enum rtl8365mb_family rtl8365mb_get_family(struct realtek_priv *priv)
++{
++	struct rtl8365mb *mb = priv->chip_data;
++
++	return mb->chip_info->family;
++}
+ #define pcs_to_rtl8365mb(_pcs) container_of((_pcs), struct rtl8365mb, pcs)
+ 
+ static int rtl8365mb_phy_poll_busy(struct realtek_priv *priv)
+--- a/drivers/net/dsa/realtek/rtl8365mb_vlan.h
++++ b/drivers/net/dsa/realtek/rtl8365mb_vlan.h
+@@ -18,6 +18,12 @@
+ 	RTL8365MB_FRAME_TYPE_UNTAGGED_ONLY,
+ };
+ 
++enum rtl8365mb_family {
++	RTL8365MB_FAMILY_C,
++	RTL8365MB_FAMILY_D,
++};
++
++enum rtl8365mb_family rtl8365mb_get_family(struct realtek_priv *priv);
+ int rtl8365mb_vlan_port_get_pvid(struct realtek_priv *priv, int port,
+ 				 u16 *pvid);
+ int
