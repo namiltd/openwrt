@@ -1,0 +1,657 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+// Device: MERCUSYS MR80X v2
+// SoC: Qualcomm IPQ5018 (IPQ0509)
+// Switch: Realtek RTL8367S
+// WLAN: IPQ5018 (2.4GHz) + QCN6122 (5GHz)
+// Flash: 128MB SD-NAND
+// RAM: 256MB
+
+/dts-v1/;
+
+#include "ipq5018.dtsi"
+#include "ipq5018-ess.dtsi"
+#include "ipq5018-qcn6122.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	model = "MERCUSYS MR80X v2";
+	compatible = "mercusys,mr80x-v2", "qcom,ipq5018";
+
+	aliases {
+		serial0 = &blsp1_uart1;
+		/*
+		 * 0:art itself carries no usable MAC (bytes read 0xff, U-Boot
+		 * reports "MAC Address from ART is not valid"). The real address is
+		 * six raw bytes at a fixed offset in the tp_data partition -
+		 * confirmed on real v2 hardware to be a flat blob at the same
+		 * layout as v5's, read directly via macaddr_tp_data_2d5030 below,
+		 * same as v5.
+		 */
+		label-mac-device = &lan1_port;
+
+		led-boot = &led_status_green;
+		led-failsafe = &led_status_orange;
+		led-running = &led_status_green;
+		led-upgrade = &led_status_green;
+	};
+
+	chosen {
+		bootargs-append = " root=/dev/ubiblock0_1 coherent_pool=2M";
+		stdout-path = "serial0:115200n8";
+	};
+
+	keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&button_pins>;
+		pinctrl-names = "default";
+
+		reset {
+			label = "reset";
+			gpios = <&tlmm 14 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+		};
+
+		wps {
+			label = "wps";
+			gpios = <&tlmm 16 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_WPS_BUTTON>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-0 = <&led_pins>;
+		pinctrl-names = "default";
+
+		/* GPL product config for MR3000Xv2 lists ALL_LED=10,33,11,32,13,12,
+		 * i.e. wan, lan1, lan2, lan3, sys_green, sys_orange - which is exactly
+		 * the mapping the working yanko-yankulov fork uses. An earlier revision
+		 * of this file had gpio32/33 as WiFi LEDs; that was wrong. */
+
+		wan {
+			gpios = <&tlmm 10 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_WAN;
+		};
+
+		lan1 {
+			gpios = <&tlmm 33 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_LAN;
+			function-enumerator = <1>;
+		};
+
+		lan2 {
+			gpios = <&tlmm 11 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_LAN;
+			function-enumerator = <2>;
+		};
+
+		lan3 {
+			gpios = <&tlmm 32 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_LAN;
+			function-enumerator = <3>;
+		};
+
+		led_status_green: status-green {
+			gpios = <&tlmm 13 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_STATUS;
+			default-state = "on";
+		};
+
+		led_status_orange: status-orange {
+			gpios = <&tlmm 12 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_ORANGE>;
+			function = LED_FUNCTION_STATUS;
+		};
+	};
+};
+
+&sleep_clk {
+	clock-frequency = <32000>;
+};
+
+&xo_board_clk {
+	clock-div = <4>;
+	clock-mult = <1>;
+};
+
+&blsp1_uart1 {
+	status = "okay";
+
+	/* Deliberately no pinctrl. Re-muxing gpio20/21 here kills console RX:
+	 * TX keeps working because printk busy-polls, but not a single RX
+	 * interrupt arrives. Verified on hardware - dropping pinctrl restores
+	 * input immediately. U-Boot already sets these pins up correctly, and
+	 * the working yanko-yankulov fork also omits pinctrl here. */
+};
+
+&crypto {
+	status = "okay";
+};
+
+&cryptobam {
+	status = "okay";
+};
+
+&prng {
+	status = "okay";
+};
+
+&qfprom {
+	status = "okay";
+};
+
+&qpic_bam {
+	status = "okay";
+};
+
+&qpic_nand {
+	pinctrl-0 = <&qpic_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	flash@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+		nand-ecc-engine = <&qpic_nand>;
+		nand-ecc-strength = <4>;	/* F50D1G41LB is a 4-bit ECC part - U-Boot prints
+					 * "ECC:4-bit". Decoding with <8> returns data that
+					 * looks clean but has silently flipped bits, which
+					 * corrupts caldata read from 0:art and the raw MAC
+					 * bytes read from tp_data. */
+		nand-ecc-step-size = <512>;
+		nand-bus-width = <8>;
+
+		/*
+		 * Static table instead of qcom,smem-part. v2 and v5 are the same
+		 * underlying hardware (SoC, switch, flash, RF front-end) - confirmed
+		 * against four independent sources: an OEM stock-firmware boot log
+		 * (partition table matches byte-for-byte through 0:training), the
+		 * RSA-2048 signing key embedded in Mercusys's own published v2 GPL
+		 * source, the LED GPIO mapping in that same source's uboot_config.mk,
+		 * and the WiFi RF calibration blob already shipped in this repo
+		 * (99.9% byte-identical to v5's, only the variant label and a
+		 * handful of gain-trim bytes differ). See this project's
+		 * openwrt-build-tools ai-memory,
+		 * mr80x-v2-v5-same-hardware-evidence-20260814.md, for the detail.
+		 *
+		 * The OEM firmware itself keeps a dual "rootfs"/"rootfs_1" pair
+		 * spanning the same byte range this collapses into one - that is
+		 * a vendor failsafe scheme, not something OpenWrt's own
+		 * UBI-managed single rootfs needs to replicate. Matches v5's own
+		 * layout choice exactly. lib/upgrade/platform.sh's MIBIB-rewrite
+		 * path (shared with v5, see mercusys_mr80x_initramfs_prepare())
+		 * performs that one-time collapse from a booted initramfs image.
+		 *
+		 * NOT YET VALIDATED ON REAL v2 HARDWARE. qcom-mibib's own profile
+		 * check refuses to touch anything if the physical MIBIB doesn't
+		 * match this exact byte pattern, so a wrong assumption here fails
+		 * safe (migration refused) rather than corrupting the device -
+		 * but a first real v2 unit should still confirm this before it's
+		 * treated as unconditionally trustworthy.
+		 */
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "0:sbl1";
+				reg = <0x00000000 0x00080000>;
+				read-only;
+			};
+
+			partition@80000 {
+				label = "0:mibib";
+				reg = <0x00080000 0x00080000>;
+			};
+
+			partition@100000 {
+				label = "0:bootconfig";
+				reg = <0x00100000 0x00040000>;
+				read-only;
+			};
+
+			partition@140000 {
+				label = "0:bootconfig1";
+				reg = <0x00140000 0x00040000>;
+				read-only;
+			};
+
+			partition@180000 {
+				label = "0:qsee";
+				reg = <0x00180000 0x00100000>;
+				read-only;
+			};
+
+			partition@280000 {
+				label = "0:devcfg";
+				reg = <0x00280000 0x00040000>;
+				read-only;
+			};
+
+			partition@2c0000 {
+				label = "0:cdt";
+				reg = <0x002c0000 0x00040000>;
+				read-only;
+			};
+
+			partition@300000 {
+				compatible = "u-boot,env";
+				label = "0:appsblenv";
+				reg = <0x00300000 0x00080000>;
+				env-size = <0x40000>;
+			};
+
+			partition@380000 {
+				label = "0:appsbl";
+				reg = <0x00380000 0x00140000>;
+				read-only;
+			};
+
+			partition@4c0000 {
+				label = "0:art";
+				reg = <0x004c0000 0x00100000>;
+				read-only;
+
+				/*
+				 * 0:art holds no usable MAC (bytes read 0xff, U-Boot
+				 * itself reports "MAC Address from ART is not valid") -
+				 * that comes from tp_data instead, via macaddr_tp_data_2d5030
+				 * below. The ath11k calibration blobs at these offsets
+				 * are real and read directly via &wifi/&wifi1's
+				 * nvmem-cells, same as v5 - no hotplug.d script needed.
+				 */
+				nvmem-layout {
+					compatible = "fixed-layout";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					cal_art_1000: calibration@1000 {
+						reg = <0x1000 0x20000>;
+						#nvmem-cell-cells = <0>;
+					};
+
+					cal_art_26800: calibration@26800 {
+						reg = <0x26800 0x20000>;
+						#nvmem-cell-cells = <0>;
+					};
+				};
+			};
+
+			partition@5c0000 {
+				label = "0:training";
+				reg = <0x005c0000 0x00080000>;
+				read-only;
+			};
+
+			partition@640000 {
+				label = "rootfs";
+				reg = <0x00640000 0x05400000>;
+			};
+
+			partition@5a40000 {
+				/* Label kept as "tp_data" (underscore) rather than
+				 * renamed to match v5's "tp-data" - purely a leftover
+				 * naming difference from when this board's DTS was
+				 * first ported, no functional effect either way now
+				 * that nothing does a userspace MTD lookup by this
+				 * string (see git history for the preinit/hotplug.d
+				 * scripts this partition used to need before its
+				 * layout was confirmed identical to v5's).
+				 */
+				label = "tp_data";
+				reg = <0x05a40000 0x00840000>;
+				read-only;
+
+				/*
+				 * Confirmed on real v2 hardware: this partition is a
+				 * flat blob at the same layout as v5's, not UBIFS -
+				 * the nvmem-layout/macaddr_tp_data_2d5030 cell below
+				 * (byte-for-byte identical to v5's) reads the real MAC
+				 * directly, same as v5, wired into gmac1/wifi/wifi1
+				 * below exactly like v5.
+				 */
+				nvmem-layout {
+					compatible = "fixed-layout";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					macaddr_tp_data_2d5030: macaddr@2d5030 {
+						compatible = "mac-base";
+						reg = <0x2d5030 0x6>;
+						#nvmem-cell-cells = <1>;
+					};
+				};
+			};
+
+			partition@6280000 {
+				label = "radio";
+				reg = <0x06280000 0x00440000>;
+			};
+
+			partition@66c0000 {
+				label = "data";
+				reg = <0x066c0000 0x00080000>;
+			};
+		};
+	};
+};
+
+/*
+ * ========================================================================
+ *     _______________________         _______________________
+ *    |        IPQ5018        |       |       RTL8367S        |
+ *    | +------+   +--------+ |       | +--------+   +------+ |
+ *    | | MAC0 |---| GE Phy |-+-PHY---+-|  Phy4  |---| P4   | |
+ *    | +------+   +--------+ |       | +--------+   +------+ |
+ *    | +------+   +--------+ |       | +--------+   +------+ |
+ *    | | MAC1 |---| Uniphy |-+-SGMII-+-| SerDes |---| P5   | |
+ *    | +------+   +--------+ |       | +--------+   +------+ |
+ *    |_______________________|       |_______________________|
+ *
+ *    RTL8367S Ports: P0=WAN, P1=LAN1, P2=LAN2, P3=LAN3
+ *    P4=IPQ GePhy (internal, not exposed as a DSA port), P5=SGMII CPU port
+ *
+ *    MAC0/GE Phy/P4 exist on this board's silicon but are left disabled
+ *    below (status left at the .dtsi default) to mirror v5's DTS exactly,
+ *    as requested - v5 doesn't have this second MAC path at all. Unlike
+ *    the reset-gpios/UNIPHY-clock values below, disabling an otherwise-idle
+ *    MAC that nothing references is low-risk either way.
+ * ========================================================================
+ */
+
+&uniphy0 {
+	status = "okay";
+
+	assigned-clocks = <&uniphy0 UNIPHY_CLK_REF>;
+	/*
+	 * WARNING: v2's original value here was UNIPHY_REFCLK_25MHZ, not
+	 * UNIPHY_REFCLK_50MHZ. Overwritten to match v5's DTS exactly as
+	 * requested, but this is a reference-clock rate, which is normally a
+	 * physical crystal/oscillator property of the board, not a software
+	 * choice - if v2's hardware actually runs a 25MHz reference, this
+	 * value is now wrong and SerDes link training may fail or misbehave
+	 * until a real v2 unit confirms one way or the other.
+	 */
+	assigned-clock-rates = <UNIPHY_REFCLK_50MHZ>;
+};
+
+/*
+ * MAC1 -> SGMII -> RTL8367S Port 5 (CPU port)
+ *
+ * No local-mac-address anywhere in this file on purpose. 0:art holds no usable
+ * factory data, those bytes read 0xff and U-Boot itself reports "MAC Address
+ * from ART is not valid". The real address is six raw bytes at a fixed offset
+ * in tp_data, read via macaddr_tp_data_2d5030 - confirmed on real hardware to
+ * work exactly like v5, no runtime script needed. Hard-coding it here would
+ * tie the image to one single unit.
+ */
+&gmac1 {
+	status = "okay";
+
+	phy-mode = "2500base-x";
+	nvmem-cell-names = "mac-address";
+	nvmem-cells = <&macaddr_tp_data_2d5030 (-1)>;
+
+	fixed-link {
+		speed = <2500>;
+		full-duplex;
+		pause;
+	};
+};
+
+&mdio0 {
+	status = "okay";
+};
+
+&mdio1 {
+	status = "okay";
+
+	pinctrl-0 = <&mdio1_pins>;
+	pinctrl-names = "default";
+
+	/* RTL8367S (chip_ver 0x00A0). Its external interface 1 is on port 6 and
+	 * supports both SGMII and HSGMII. U-Boot sets it to HSGMII on every boot
+	 * ("Set RTL8367S SGMII 2.5Gbps"), but 3.125 GBaud is not reliable on this
+	 * board: measured 4-13 %% packet loss with every MAC counter at zero,
+	 * because frames mangled on the SerDes are dropped by the PCS layer before
+	 * the MAC sees a frame. Plain 1G SGMII measures 0 %% loss and is plenty -
+	 * the radios do ~350 Mbit. Both ends are set below and in &gmac1.
+	 *
+	 * FIXME: this comment and the fixed-link speed below (and in &gmac1)
+	 * disagree - the comment describes a 1G fallback, but both fixed-link
+	 * nodes still say 2500. Not touched while restructuring this file to
+	 * match v5's layout: needs a real v2 unit to find out which one is
+	 * actually correct before either the value or this comment changes.
+	 *
+	 * The child "realtek,smi-mdio" node is mandatory - without it the driver
+	 * finds the chip but aborts with "no MDIO bus node" / -ENODEV. */
+	switch@29 {
+		compatible = "realtek,rtl8365mb";
+		reg = <29>;
+		/*
+		 * WARNING: this single reset-gpios (moved here from the mdio1 bus
+		 * node above, matching v5 exactly as requested) replaces what v2's
+		 * original file had verified on real hardware: gpio39 on the mdio1
+		 * bus node (matching the OEM DTB's phy-reset-gpio) PLUS a second,
+		 * separately toggled reset-gpios = gpio26 here on the switch node
+		 * itself - confirmed on hardware to be what actually brings the
+		 * switch chip out of reset ("driving gpio26 low then high makes a
+		 * previously silent chip answer immediately"; without it MDIO reads
+		 * return 0xffff forever on the normal NAND autoboot path). v5 only
+		 * ever uses gpio39 for this and statically hogs gpio26 high instead
+		 * (see &tlmm's phy_reset_hog below) for an unrelated purpose. If
+		 * this single-gpio39 reset doesn't actually bring v2's switch out
+		 * of reset the way the dual-gpio scheme was verified to, the switch
+		 * will stay silent - this needs a real v2 unit to confirm either
+		 * way before it's trusted.
+		 */
+		reset-gpios = <&tlmm 39 GPIO_ACTIVE_LOW>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				label = "wan";
+				phy-handle = <&rtl8367s_phy0>;
+				nvmem-cell-names = "mac-address";
+				nvmem-cells = <&macaddr_tp_data_2d5030 1>;
+			};
+
+			lan1_port: port@1 {
+				reg = <1>;
+				label = "lan1";
+				phy-handle = <&rtl8367s_phy1>;
+				nvmem-cell-names = "mac-address";
+				nvmem-cells = <&macaddr_tp_data_2d5030 0>;
+			};
+
+			port@2 {
+				reg = <2>;
+				label = "lan2";
+				phy-handle = <&rtl8367s_phy2>;
+				nvmem-cell-names = "mac-address";
+				nvmem-cells = <&macaddr_tp_data_2d5030 2>;
+			};
+
+			port@3 {
+				reg = <3>;
+				label = "lan3";
+				phy-handle = <&rtl8367s_phy3>;
+				nvmem-cell-names = "mac-address";
+				nvmem-cells = <&macaddr_tp_data_2d5030 3>;
+			};
+
+			port@6 {
+				reg = <6>;
+				label = "cpu";
+				ethernet = <&gmac1>;
+				phy-mode = "2500base-x";
+				qca,sgmii-enable-pll;
+
+				fixed-link {
+					speed = <2500>;
+					full-duplex;
+					pause;
+				};
+			};
+		};
+
+		mdio {
+			compatible = "realtek,smi-mdio";
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			rtl8367s_phy0: ethernet-phy@0 {
+				reg = <0>;
+			};
+
+			rtl8367s_phy1: ethernet-phy@1 {
+				reg = <1>;
+			};
+
+			rtl8367s_phy2: ethernet-phy@2 {
+				reg = <2>;
+			};
+
+			rtl8367s_phy3: ethernet-phy@3 {
+				reg = <3>;
+			};
+		};
+	};
+};
+
+&tlmm {
+	/*
+	 * WARNING: added to mirror v5's DTS exactly, as requested. On v5 this
+	 * statically holds gpio26 high for an unrelated purpose, because v5's
+	 * switch reset only uses gpio39 (see switch@29 above). v2's original
+	 * file drove gpio26 as its own separate, actively-toggled switch reset
+	 * line instead (now removed above to match v5's single-gpio39 scheme) -
+	 * if that dual-gpio scheme turns out to still be what v2 hardware
+	 * actually needs, this static hog would fight a driver trying to
+	 * toggle the same pin. Flagging for the same real-hardware check as
+	 * switch@29's reset-gpios above.
+	 */
+	phy_reset_hog: phy-reset-hog {
+		gpio-hog;
+		gpios = <26 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "phy-reset-gpio";
+	};
+
+	button_pins: button-state {
+		pins = "gpio14", "gpio16";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	led_pins: led-state {
+		pins = "gpio10", "gpio11", "gpio12",
+		       "gpio13", "gpio32", "gpio33";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-down;
+	};
+
+	mdio1_pins: mdio-state {
+		mdc-pins {
+			pins = "gpio36";
+			function = "mdc";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+
+		mdio-pins {
+			pins = "gpio37";
+			function = "mdio";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+
+	qpic_pins: qpic-state {
+		clock-pins {
+			pins = "gpio9";
+			function = "qspi_clk";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		cs-pins {
+			pins = "gpio8";
+			function = "qspi_cs";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		data-pins {
+			pins = "gpio4", "gpio5", "gpio6", "gpio7";
+			function = "qspi_data";
+			drive-strength = <8>;
+			bias-disable;
+		};
+	};
+};
+
+/*
+ * WARNING: added to mirror v5's DTS exactly, as requested. v2's original
+ * file had no override here at all, relying on whatever size the base
+ * .dtsi gives the WiFi remoteproc region by default. Untested on real v2
+ * hardware - if the default was actually correct for v2, this could shrink
+ * or move that region incorrectly.
+ */
+&q6_region {
+	reg = <0x0 0x4b000000 0x0 0x2e00000>;
+};
+
+&q6v5_wcss {
+	status = "okay";
+
+	/* Exact value from the OEM DTB and the working yanko-yankulov fork:
+	 *   <1 4 3 15 0 0>  PCIE0 (pcie@a0000000, PERST gpio15) -> UPD3
+	 *   <2 4 2 27 0 0>  PCIE1 (pcie@80000000, PERST gpio27) -> UPD2 [QCN6122] */
+	boot-args = <0x1 4 3 15 0 0 0x2 4 2 27 0 0>;
+};
+
+&wifi {
+	/* IPQ5018 2.4GHz */
+	status = "okay";
+
+	qcom,rproc = <&q6_wcss_pd1>;
+	qcom,userpd-subsys-name = "q6v5_wcss_userpd1";
+	qcom,ath11k-calibration-variant = "Mercusys-MR80X-v5";
+	qcom,ath11k-fw-memory-mode = <2>;
+	qcom,ath11k-low-memory-datapath;
+	qcom,ath11k-calibration-needs-macflag;
+	qcom,bdf-addr = <0x4c400000>;
+	nvmem-cell-names = "mac-address", "calibration";
+	nvmem-cells = <&macaddr_tp_data_2d5030 4>, <&cal_art_1000>;
+};
+
+&wifi1 {
+	/* QCN6122 5GHz */
+	status = "okay";
+
+	qcom,rproc = <&q6_wcss_pd2>;
+	qcom,userpd-subsys-name = "q6v5_wcss_userpd2";
+	qcom,ath11k-calibration-variant = "Mercusys-MR80X-v5";
+	qcom,ath11k-fw-memory-mode = <2>;
+	qcom,ath11k-low-memory-datapath;
+	qcom,ath11k-calibration-needs-macflag;
+	qcom,bdf-addr = <0x4d100000>;
+	qcom,m3-dump-addr = <0x4df00000>;
+	nvmem-cell-names = "mac-address", "calibration";
+	nvmem-cells = <&macaddr_tp_data_2d5030 5>, <&cal_art_26800>;
+};
