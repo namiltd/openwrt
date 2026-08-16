@@ -17,6 +17,10 @@ ipq50xx_setup_interfaces()
 	glinet,gl-b3000)
 		ucidef_set_interfaces_lan_wan "lan1 lan2" "wan"
 		;;
+	mercusys,mr80x-v2|\
+	mercusys,mr80x-v5)
+		ucidef_set_interfaces_lan_wan "lan1 lan2 lan3" "wan"
+		;;
 	cmcc,mr3000d-ci|\
 	linksys,mx2000|\
 	linksys,mx5500|\
