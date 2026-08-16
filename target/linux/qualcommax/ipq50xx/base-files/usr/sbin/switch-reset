@@ -1,0 +1,34 @@
+#!/bin/sh
+# Force a full re-probe of the RTL8367S-VB switch driver without rebooting.
+#
+# `/etc/init.d/network restart` (and plain ifup/ifdown) only reconfigure
+# netifd-level interfaces and bridge port admin state; they do not re-run
+# the DSA switch driver's setup() path, so chip identification, the family D
+# 802.1Q CPU path and the SDS13 SerDes tuning only happen once, at kernel
+# boot. Topology changes that require that setup to run again (e.g. moving
+# wan in or out of a VLAN-filtering bridge) otherwise need a full reboot to
+# take effect. Unbinding and rebinding the MDIO device forces the same
+# setup() path a cold boot takes, in a few seconds.
+
+. /lib/functions.sh
+
+MDIO_DEV="90000.mdio-1:1d"
+DRIVER_PATH="/sys/bus/mdio_bus/drivers/rtl8365mb-mdio"
+
+case "$(board_name)" in
+mercusys,mr80x-v2|\
+mercusys,mr80x-v5) ;;
+*)
+	echo "switch-reset: not a Mercusys MR80X v2/v5, refusing" >&2
+	exit 1
+	;;
+esac
+
+[ -e "$DRIVER_PATH/$MDIO_DEV" ] || {
+	echo "switch-reset: $MDIO_DEV not currently bound, nothing to do" >&2
+	exit 1
+}
+
+echo "$MDIO_DEV" > "$DRIVER_PATH/unbind"
+sleep 2
+echo "$MDIO_DEV" > "$DRIVER_PATH/bind"
