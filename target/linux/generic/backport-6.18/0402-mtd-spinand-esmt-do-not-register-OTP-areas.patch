@@ -1,0 +1,78 @@
+From: OpenWrt MR80X v2 port
+Subject: mtd: spinand: esmt: do not register the OTP areas
+
+Kernel 6.18 added OTP support for the ESMT F50L1G41LB and F50D1G41LB. On the
+Mercusys MR80X v2 (IPQ5018, QPIC SPI NAND) registering those areas makes the
+SPI NAND unusable, in two separate ways.
+
+The first one has a proper fix elsewhere. qcom_spi_send_cmdaddr() used to run
+the command before qcom_spi_io_op() wrote the value into NAND_FLASH_FEATURES,
+so every SET_FEATURE landed one operation late. spinand_otp_rw() enables OTP
+mode, reads, and disables it again, and mtd_otp_nvmem_add() does exactly that
+during MTD registration, so the "disable" wrote the previously requested value
+and CFG_OTP_ENABLE stayed set. The chip then serves its OTP area instead of the
+array: page 0 returns the unique ID page, page 1 the ONFI parameter page,
+everything above reads as 0xff. Reads report no error, because the hardware
+erased-page detector legitimately flags those pages as blank, and writes fail
+with -EIO. It looks exactly like a wiped flash while the content is untouched.
+
+That off-by-one is fixed by "spi: spi-qpic-snand: write the feature value
+before executing SET_FEATURE" from openwrt/openwrt#24197, which this tree also
+carries. Measured here before that fix:
+
+  cfg as found at probe = 00 (otp_en=0)   first probe, chip is clean
+  cfg as found at probe = 40 (otp_en=1)   second probe, OTP was left on
+  OTP off: cached=00 chip=40 -> chip=00   cache and chip disagree
+
+The second one is why this patch is still needed. With the SET_FEATURE fix in
+place and the OTP declarations restored, the spinand probe fails outright, four
+milliseconds after the chip is identified:
+
+  spi-nand spi0.0: ESMT SPI NAND was found.
+  spi-nand spi0.0: 128 MiB, block size: 128 KiB, page size: 2048, OOB size: 64
+  spi-nand spi0.0: probe with driver spi-nand failed with error -512
+
+No MTD device is created at all, so there are no partitions, no calibration
+data and no sysupgrade. It reproduces on a manual driver rebind, so it is not a
+timing race. Dropping the OTP declarations makes it probe cleanly every time.
+Why the registration returns -ERESTARTSYS on this board is not established; one
+difference against the TP-Link Archer AX55 v1, which runs the same silicon with
+OTP enabled, is that this device tree hangs an nvmem-layout off the 0:art
+partition for the WiFi calibration data.
+
+The feature is unused on this hardware and the rest of the chip support is
+untouched. 6.12 is unaffected because it carries no OTP support for these parts.
+
+The analysis above and the fix itself originate from the equivalent patch in
+the Gameplayer-1-8/openwrt_mrx80_v2 tree (Mercusys MR80X v2, same IPQ5018 +
+ESMT F50L1G41LB/F50D1G41LB silicon family). Carried here unmodified because
+the Mercusys MR80X v5 hits the identical OTP registration bug on the same
+chip family; confirmed independently on v5 hardware in this tree before this
+patch was found, matching the same "cache and chip disagree" / probe failure
+symptoms described above.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+--- a/drivers/mtd/nand/spi/esmt.c
++++ b/drivers/mtd/nand/spi/esmt.c
+@@ -208,9 +208,7 @@
+ 					      &write_cache_variants,
+ 					      &update_cache_variants),
+ 		     0,
+-		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, NULL),
+-		     SPINAND_USER_OTP_INFO(28, 2, &f50l1g41lb_user_otp_ops),
+-		     SPINAND_FACT_OTP_INFO(2, 0, &f50l1g41lb_fact_otp_ops)),
++		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, NULL)),
+ 	SPINAND_INFO("F50D1G41LB",
+ 		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x11, 0x7f,
+ 				0x7f),
+@@ -220,9 +218,7 @@
+ 					      &write_cache_variants,
+ 					      &update_cache_variants),
+ 		     0,
+-		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, NULL),
+-		     SPINAND_USER_OTP_INFO(28, 2, &f50l1g41lb_user_otp_ops),
+-		     SPINAND_FACT_OTP_INFO(2, 0, &f50l1g41lb_fact_otp_ops)),
++		     SPINAND_ECCINFO(&f50l1g41lb_ooblayout, NULL)),
+ 	SPINAND_INFO("F50D2G41KA",
+ 		     SPINAND_ID(SPINAND_READID_METHOD_OPCODE_ADDR, 0x51, 0x7f,
+ 				0x7f, 0x7f),
