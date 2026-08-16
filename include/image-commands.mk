@@ -639,6 +639,34 @@ define Build/netgear-encrypted-factory
 		--iv 4a253169516c38243d6c6d2d3b384145
 endef
 
+define Build/nflash-partition-header
+	# Prepends the 44-byte nflash_partitions header appsbl's
+	# nm_api_getOSoffset() (vendor/u-boot-2016/lib/nvrammanager/nm_api.c,
+	# a TP-Link/Mercusys NVRAM-manager bootloader) requires at the start
+	# of a fw-type:Cloud payload - see Build/tplink-cloud-sign below,
+	# which this is meant to run right before. A single, unchained entry
+	# (next_offset=0): name is arbitrary/unused beyond "must be
+	# non-empty", start_addr+size must equal this header's own length
+	# (44 bytes) so the real payload is found immediately after it. All
+	# three integer fields are big-endian u32 (nm_api_getOSoffset() reads
+	# them through ntohl()).
+	#
+	# This is not optional cosmetic framing: nm_api_getOSoffset() returns
+	# -1 (cast to an unsigned NAND write offset, i.e. 0xFFFFFFFF) if this
+	# header is missing or malformed, and nm_upgradeFwupFile() feeds that
+	# straight into `nand write <corrupt addr> <corrupt size>` - a
+	# payload without this header does not fail cleanly, it risks
+	# corrupting the flash.
+	( \
+		printf '%s' 'os-image' | dd bs=32 count=1 conv=sync 2>/dev/null; \
+		printf '\000\000\000\000'; \
+		printf '\000\000\000\000'; \
+		printf '\000\000\000\054'; \
+		cat $@; \
+	) > $@.new
+	mv $@.new $@
+endef
+
 define Build/openmesh-image
 	$(TOPDIR)/scripts/om-fwupgradecfg-gen.sh \
 		"$(call param_get_default,ce_type,$(1),$(DEVICE_NAME))" \
@@ -743,6 +771,88 @@ define Build/sysupgrade-tar
 		--rootfs $(call param_get_default,rootfs,$(1),$(IMAGE_ROOTFS)) \
 		$(if $(dtb),--dtb $(dtb)) \
 		$@
+endef
+
+# Signs the current image ($@) as a TP-Link/Mercusys "fw-type:Cloud"
+# NVRAM-manager firmware package, using the host tplink-cloud-sign tool
+# (package/utils/firmware-utils and tools/firmware-utils - a clean-room
+# reimplementation of nm_fwup.c's handle_fw_cloud() signing side; see
+# that tool's own source header for the full byte layout writeup). Run
+# Build/nflash-partition-header first - this only wraps/signs the
+# container, it does not add the inner partition-locator header
+# handle_fw_cloud()'s own NAND-write path needs.
+#
+# Argument 1: RSA key size, 1024 or 2048 (default: 2048, PSS/SHA-256 -
+# what recent real MR80X v5 OEM firmware itself uses; 1024 is the older
+# PKCS#1v1.5 legacy scheme some earlier devices/firmware still accept
+# instead).
+#
+# tplink-cloud-sign has no compiled-in key of its own (unlike
+# mktplinkfw/tplink-safeloader, it has no vendor default to fall back
+# to either) - never TP-Link/Mercusys's real signing key, which this
+# tool does not have and cannot derive, only ever a key a device points
+# it at below. An appsbl running stock/unmodified firmware verification
+# will reject an image signed with this project's own research keys
+# outright; it is only accepted by an appsbl rebuilt in dual-key mode
+# with the matching public key added (see appsbl-toolkit), or one whose
+# keys were fully replaced.
+#
+# A device sets which key to sign with by setting
+# TPLINK_CLOUD_KEY_1024/2048 (DEVICE_VARS) to either:
+#   - a file path, e.g. TPLINK_CLOUD_KEY_2048 := /path/to/key.pem, or
+#   - the PEM content itself, inline as ONE line, real newlines written
+#     as literal two-character backslash-n escapes, e.g.:
+#     TPLINK_CLOUD_KEY_2048 := -----BEGIN PRIVATE KEY----- backslash-n MIIEvQ... backslash-n -----END PRIVATE KEY----- backslash-n
+# Told apart by whether the value starts with "-----BEGIN" (inline) or
+# not (a path) - no real filesystem path looks like the former. Leaving
+# it unset makes this step fail (tplink-cloud-sign itself refuses to
+# sign without a key) rather than silently produce an unsigned or
+# wrongly-signed image.
+#
+# Why inline values must be backslash-n-escaped, not a real multi-line
+# value: DEVICE_VARS values get re-parsed as Makefile text by
+# BuildImage's own eval/call machinery (every Device/ block goes
+# through this, not something specific to this variable) - an actual
+# embedded newline there reads back as several broken lines instead of
+# one, and make dies with "missing separator" before the image build
+# even starts. A literal backslash-n is just two ordinary characters as
+# far as make (or a shell command line) is concerned, so it survives
+# that reparse intact; the printf call below is what expands it back
+# into a real newline, right before piping straight into the tool's
+# stdin (--private-key-stdin, never as a --private-key argument, and
+# never written to a scratch file - an inline key touches nothing but
+# this one pipe, and never appears in argv/ps).
+#
+# An inline value may itself be split across several Makefile source
+# lines with a trailing backslash (purely for readability, one PEM line
+# per source line - see e.g. ipq50xx.mk) - GNU Make joins those back
+# into one line for us, but inserts a space at every join point, which
+# would land right after a backslash-n and corrupt the PEM's base64
+# body. The substitution below removes exactly that: a space
+# immediately after backslash-n, and only that - a real multi-line
+# source value collapses back to byte-identical to the unwrapped
+# one-liner.
+#
+# NOTE: keep this whole comment block ABOVE define/endef, not inside
+# it. Text inside a Build/ macro body is not a passive comment - it is
+# captured verbatim and re-expanded every time the macro runs, so any
+# make syntax written here "for illustration" (a literal $(subst ...)
+# or $(eval ...)) gets actually evaluated too, and can desync the
+# parser for the real code below it. This cost real debugging time once
+# already - a stray "$(subst ...)" in a comment here previously broke
+# the recipe with "insufficient number of arguments to function
+# 'subst'", with no indication the comment was the cause.
+define Build/tplink-cloud-sign
+	$(eval tcs_alg := $(if $(1),$(1),2048))
+	$(eval tcs_key := $(subst \n$(space),\n,$(if $(filter 1024,$(tcs_alg)),$(TPLINK_CLOUD_KEY_1024),$(TPLINK_CLOUD_KEY_2048))))
+	$(eval tcs_key_inline := $(filter -----BEGIN%,$(tcs_key)))
+	$(if $(tcs_key_inline), \
+		printf '%b' "$(tcs_key)" | $(STAGING_DIR_HOST)/bin/tplink-cloud-sign sign \
+			--alg $(tcs_alg) --private-key-stdin --payload $@ --out $@.new, \
+		$(STAGING_DIR_HOST)/bin/tplink-cloud-sign sign \
+			--alg $(tcs_alg) $(if $(tcs_key),--private-key $(tcs_key)) --payload $@ --out $@.new \
+	)
+	mv $@.new $@
 endef
 
 define Build/tplink-image-2022
