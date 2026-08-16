@@ -1,0 +1,51 @@
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Subject: [PATCH] net: dsa: realtek: add RTL8367S-VB initialization table
+
+Use the RTL8367S-VB register initialization values from the GPL driver for
+the exact 0x6642/0x0010 variant. Keep the existing generic tables unchanged
+for every other RTL8365MB-family switch.
+
+The table was originally introduced by Serge Vasilugin, DENG Qingfang,
+Chuanhong Guo, Gaspare Bruno and Mieczyslaw Nalewaj in the GPL rtl8367b
+driver. Values are selected only through the RTL8367S-VB chip descriptor.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+---
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c	2026-08-16 11:20:59.561757247 -0300
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c	2026-08-16 11:20:59.573757731 -0300
+@@ -666,6 +666,24 @@
+ 	{ 0x1D32, 0x0002 },
+ };
+ 
++static const struct rtl8365mb_jam_tbl_entry rtl8367s_vb_init_jam[] = {
++	{ 0x13C2, 0x0000 }, { 0x0018, 0x0F00 }, { 0x0038, 0x0F00 },
++	{ 0x0058, 0x0F00 }, { 0x0078, 0x0F00 }, { 0x0098, 0x0F00 },
++	{ 0x1D15, 0x0A69 }, { 0x2000, 0x1340 }, { 0x2020, 0x1340 },
++	{ 0x2040, 0x1340 }, { 0x2060, 0x1340 }, { 0x2080, 0x1340 },
++	{ 0x13EB, 0x15BB }, { 0x1303, 0x06D6 }, { 0x1304, 0x0700 },
++	{ 0x13E2, 0x003F }, { 0x13F9, 0x0090 }, { 0x121E, 0x03CA },
++	{ 0x1233, 0x0352 }, { 0x1237, 0x00A0 }, { 0x123A, 0x0030 },
++	{ 0x1239, 0x0084 }, { 0x0301, 0x1000 }, { 0x1349, 0x001F },
++	{ 0x18E0, 0x4004 }, { 0x122B, 0x641C }, { 0x1305, 0xC000 },
++	{ 0x1200, 0x7FCB }, { 0x0884, 0x0003 }, { 0x06EB, 0x0001 },
++	{ 0x00CF, 0xFFFF }, { 0x00D0, 0x0007 }, { 0x00CE, 0x48B0 },
++	{ 0x0398, 0xFFFF }, { 0x0399, 0x0007 }, { 0x0300, 0x0001 },
++	{ 0x03FA, 0x0007 }, { 0x08C8, 0x00C0 }, { 0x0A30, 0x020E },
++	{ 0x0800, 0x0000 }, { 0x0802, 0x0000 }, { 0x09DA, 0x0017 },
++	{ 0x1D32, 0x0002 },
++};
++
+ /* SGMII SerDes tuning parameters, lifted from the vendor driver sources. The
+  * vendor driver keeps two variants of this table and selects between them
+  * based on the chip option register; these are the values for a non-zero
+@@ -780,8 +798,8 @@
+ 			{ 7, 2, PHY_INTF(MII) | PHY_INTF(TMII) |
+ 				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+ 		},
+-		.jam_table = rtl8365mb_init_jam_8365mb_vc,
+-		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
++		.jam_table = rtl8367s_vb_init_jam,
++		.jam_size = ARRAY_SIZE(rtl8367s_vb_init_jam),
+ 	},
+ 	{
+ 		.name = "RTL8367RB-VB",
