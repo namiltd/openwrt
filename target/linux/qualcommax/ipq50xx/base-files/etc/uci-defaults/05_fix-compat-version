@@ -1,0 +1,14 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/functions/system.sh
+
+case "$(board_name)" in
+mercusys,mr80x-v2|\
+mercusys,mr80x-v5)
+	uci set system.@system[0].compat_version="2.0"
+	uci commit system
+	;;
+esac
+
+exit 0
