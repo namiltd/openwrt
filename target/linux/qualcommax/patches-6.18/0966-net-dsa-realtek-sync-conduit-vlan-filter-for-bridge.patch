@@ -1,0 +1,117 @@
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Subject: [PATCH] net: dsa: realtek: sync the conduit's own hardware VLAN filter on bridge-vlan membership changes
+
+DSA's own "direct VLAN on a user port" path
+(net/dsa/user.c:dsa_user_vlan_rx_add_vid()) calls both
+dsa_port_vlan_add() (the switch's own VLAN table) and
+dsa_port_host_vlan_add() for every VID it adds. The latter, besides
+notifying the driver, also calls vlan_vid_add() on the conduit netdevice
+itself - registering that VID in the conduit's own hardware RX VLAN
+filter (net/dsa/port.c), which stmmac (this board's dwmac-ipq5018
+conduit) implements and enables unconditionally whenever the MAC
+reports VLAN hash filtering capability
+(drivers/net/ethernet/stmicro/stmmac/stmmac_main.c,
+NETIF_F_HW_VLAN_CTAG_FILTER, gated on priv->dma_cap.vlhash).
+
+Generic Linux bridge VLAN filtering (switchdev, i.e. a VLAN-aware
+bridge with vlan_filtering=1 and VLANs added through bridge-vlan
+membership rather than a plain kernel VLAN device stacked directly on
+a DSA user port) does not go through dsa_user_vlan_rx_add_vid() at
+all, and therefore never calls dsa_port_host_vlan_add() or
+vlan_vid_add() on the conduit. The switch itself gets correctly
+configured (this driver's rtl8365mb_port_vlan_add()/_del() apply to
+both paths identically, via the same dsa_switch_ops.port_vlan_add/del
+hooks) and correctly forwards a VLAN-tagged frame to the CPU - but the
+conduit's own hardware VLAN filter never learned that VID, so it
+silently drops the frame at the MAC/DMA level before it ever reaches
+the DSA tag-decoding layer. This shows up as counted, non-error
+rx_dropped on the resulting VLAN sub-interface (e.g. a VLAN-aware
+bridge's own "br<n>.<vid>" self-interface), not as any kind of
+corruption or DSA-visible decode failure - the frame was fine, the
+conduit chose not to pass it up.
+
+Measured on a Mercusys MR80X v5 (RTL8367S-VB, family D, native RTL8_4
+CPU tag - no 8021q tag protocol involved in this particular test):
+a VLAN-aware test bridge with the WAN port tagged into a VLAN reached
+"forwarding" state cleanly, the switch and conduit both showed healthy
+RX activity, but the VLAN sub-interface's own DHCP client never
+completed - rx_dropped counting up on exactly that interface, zero
+rx_errors/rx_crc_errors/rx_frame_errors, i.e. a deliberate filter
+drop, not corruption.
+
+Fix it in the driver rather than relying on Linux's generic
+"CPU/host VLAN add" plumbing to be reachable from every VLAN-membership
+path (it currently isn't, for hardware-filtering conduits reached via
+switchdev bridge VLANs): keep the conduit's own VLAN filter in sync
+directly from rtl8365mb_port_vlan_add()/_del(), which both paths
+(direct user-port VLAN and switchdev bridge VLAN) already call
+identically. Every VID actually programmed into the switch's own
+tables is also registered on the conduit, regardless of which UCI/
+kernel mechanism asked for it.
+
+v2: dsa_switch_host_vlan_add() (net/dsa/switch.c) replays this same
+driver op for every dsa_port in the tree, including the CPU port's own
+entry - which has no dp->cpu_dp of its own, since a CPU port isn't its
+own CPU port. The first version of this patch dereferenced that
+unconditionally and crashed with a NULL pointer fault in
+dsa_port_to_conduit() the moment any bridge (even the plain default
+br-lan, which always replays VLAN 1 on join regardless of
+vlan_filtering) brought a port up - reproduced on real hardware.
+Guard on dp && dp->cpu_dp before touching the conduit.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+---
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -2309,6 +2309,7 @@ static int rtl8365mb_port_vlan_add(stru
+ {
+ 	bool untagged = !!(vlan->flags & BRIDGE_VLAN_INFO_UNTAGGED);
+ 	bool pvid = !!(vlan->flags & BRIDGE_VLAN_INFO_PVID);
++	struct dsa_port *dp;
+ 	u16 pvid_vid;
+ 	struct realtek_priv *priv = ds->priv;
+ 	int ret;
+@@ -2344,6 +2345,23 @@ static int rtl8365mb_port_vlan_add(stru
+ 	ret = rtl8365mb_vlan_4k_port_add(ds, port, vlan, extack);
+ 	if (ret)
+ 		goto undo_set_pvid;
++
++	/* Generic switchdev bridge-vlan membership never reaches
++	 * dsa_port_host_vlan_add(), so the conduit's own hardware VLAN
++	 * filter (if it has one) would otherwise never learn this VID and
++	 * would silently drop tagged frames meant for the CPU. Keep it in
++	 * sync here instead, for every path that can add a VLAN.
++	 *
++	 * DSA replays this same op for the CPU port's own dsa_port entry
++	 * too (dsa_switch_host_vlan_add() walks every port, not just user
++	 * ports); that entry has no dp->cpu_dp of its own, so guard against
++	 * it instead of dereferencing a NULL cpu_dp inside
++	 * dsa_port_to_conduit().
++	 */
++	dp = dsa_to_port(ds, port);
++	if (dp && dp->cpu_dp)
++		vlan_vid_add(dsa_port_to_conduit(dp), htons(ETH_P_8021Q),
++			    vlan->vid);
+ 
+ 	ret = 0;
+ 	goto out_unlock;
+@@ -2372,6 +2387,7 @@ static int rtl8365mb_port_vlan_del(stru
+ {
+ 	bool untagged = !!(vlan->flags & BRIDGE_VLAN_INFO_UNTAGGED);
+ 	bool pvid = !!(vlan->flags & BRIDGE_VLAN_INFO_PVID);
++	struct dsa_port *dp;
+ 	struct realtek_priv *priv = ds->priv;
+ 	int ret;
+ 
+@@ -2387,6 +2403,11 @@ static int rtl8365mb_port_vlan_del(stru
+ 	if (ret)
+ 		goto out_unlock;
+ 
++	dp = dsa_to_port(ds, port);
++	if (dp && dp->cpu_dp)
++		vlan_vid_del(dsa_port_to_conduit(dp), htons(ETH_P_8021Q),
++			    vlan->vid);
++
+ 	ret = rtl8365mb_vlan_4k_port_del(ds, port, vlan);
+ 	/* There is little incentive to try to undo the removal of PVID (if it
+ 	 * was really in use) as an error here might indicate the ASIC stopped
