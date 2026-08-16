@@ -5,10 +5,10 @@ PKG_NAME:=ipq-wifi
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL=$(PROJECT_GIT)/project/firmware/qca-wireless.git
-PKG_SOURCE_DATE:=2026-05-18
-PKG_SOURCE_VERSION:=e20f4c6ff197823762319e4b7e31af01816503cf
-PKG_MIRROR_HASH:=a0109d830c474aeca2716496cb2eab05319c4d6671ae2d02c43449a94da183fa
+PKG_SOURCE_URL:=https://github.com/fbinerd/firmware_qca-wireless.git
+PKG_SOURCE_DATE:=2026-08-15
+PKG_SOURCE_VERSION:=e8f178adfcf7b76696e618379218df4530158db5
+PKG_MIRROR_HASH:=97f7d2ca5fc8b8ac7b58efe0c719817f7e8a2180ff529a5cbaa809652c297b08
 PKG_FLAGS:=nonshared
 
 include $(INCLUDE_DIR)/package.mk
@@ -68,6 +68,7 @@ ALLWIFIBOARDS:= \
 	meraki_mr30h \
 	meraki_underdog \
 	meraki_z3 \
+	mercusys_mr80x-v2_v5 \
 	netgear_lbr20 \
 	netgear_rax120v2 \
 	netgear_rbk20 \
@@ -198,8 +199,12 @@ This is package is only necessary for the $(2).
 Do not install it for any other device!
   endef
 
-  define Package/ipq-wifi-$(1)/install-overlay
-    $$$$(foreach IPQ_WIFI_BOARD_FILE,$$$$(wildcard $(PKG_BUILD_DIR)/board-$(1).*),\
+  # Local deviation from upstream: board data normally comes from the qca-wireless
+  # git source, so a device whose BDF is not upstream yet has no way to ship one.
+  # Also install (not install-overlay) so the files land in the squashfs.
+  # The clean fix is to submit the board data to qca-wireless.
+  define Package/ipq-wifi-$(1)/install
+    $$$$(foreach IPQ_WIFI_BOARD_FILE,$$$$(wildcard $(PKG_BUILD_DIR)/board-$(1).* $(TOPDIR)/package/firmware/ipq-wifi/files/board-$(1).* $(TOPDIR)/package/firmware/ipq-wifi/board-$(1).*),\
       $$$$(call ipq-wifi-install-one,$$$$(IPQ_WIFI_BOARD_FILE),$$(1)))
   endef
 
@@ -265,6 +270,7 @@ $(eval $(call generate-ipq-wifi-package,linksys_whw03,Linksys WHW03))
 $(eval $(call generate-ipq-wifi-package,meraki_mr30h,Meraki MR30H))
 $(eval $(call generate-ipq-wifi-package,meraki_underdog,Meraki underdog))
 $(eval $(call generate-ipq-wifi-package,meraki_z3,Meraki Z3))
+$(eval $(call generate-ipq-wifi-package,mercusys_mr80x-v2_v5,MERCUSYS MR80X v2/v5))
 $(eval $(call generate-ipq-wifi-package,netgear_lbr20,Netgear LBR20))
 $(eval $(call generate-ipq-wifi-package,netgear_rax120v2,Netgear RAX120v2))
 $(eval $(call generate-ipq-wifi-package,netgear_rbk20,Netgear RBK20))
