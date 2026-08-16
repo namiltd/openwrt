@@ -1,0 +1,101 @@
+#!/bin/sh
+# Generic first-boot MIBIB profile migration for qcom-mibib-based
+# boards: switches from a board's stock MIBIB profile to a unified
+# one, then grows rootfs_data into the reclaimed space.
+#
+# This exists for images meant to be flashed through APPSBL's own
+# recovery HTTP server (or the OEM's own upgrade UI): that code path
+# has zero awareness of partition layout - up_file_via_httpd()/
+# nm_upgradeFirmware() in appsbl just does a raw NAND erase+write into
+# whatever "rootfs" MTD partition the SMEM table already reports,
+# sized against it (rootfs_flash_size) before anything is written. A
+# "factory" image built for the unified layout would either get
+# rejected outright there (too big for the still-stock partition) or,
+# if built to fit the old, smaller stock ceiling, boot fine but never
+# get the rest of the flash. This script grows a stock-profile first
+# boot into the unified layout on its own, so one dumb-httpd-flashable
+# image is enough - no second image, no network access, no user
+# interaction.
+#
+# Different from mercusys_mr80x_initramfs_prepare() in platform.sh,
+# which does the same MIBIB switch but via a full ubiformat of the
+# rootfs MTD partition - safe there only because it always runs from a
+# RAM-resident initramfs with no dependency on the flash content it's
+# about to erase. Reformatting the SAME rootfs a normally NAND-booted
+# system is currently mounted from is a much riskier operation, so
+# this script never reformats anything: it only grows the existing
+# rootfs_data UBI volume in place after the switch (resizing a dynamic
+# UBI volume upward only appends free space - it never touches the
+# LEBs already in use), and only after qcom-mibib's own strict
+# profile/byte-pattern check has already refused to touch anything it
+# doesn't recognize.
+#
+# WARNING: unlike the initramfs path above (exercised repeatedly this
+# project via real hardware RAM-boot), this exact sequence - a live
+# MIBIB switch plus an in-place UBI grow from a normally NAND-booted
+# system - has only been validated for the MR80X entry below. If the
+# reboot below never comes back up for any reason, the device still
+# boots: this only ever runs after the stock image is already fully
+# written and working, and qcom-mibib apply() only ever replaces the
+# OLDER of the two MIBIB boot copies, leaving the previous (stock)
+# copy intact as a fallback (see MIBIB_BOOT_COPY_COUNT in qcom-mibib).
+#
+# Adding a board: qcom-mibib itself only knows the profile names baked
+# into its own enum (see profile_name()/parse_profile() in
+# package/utils/qcom-mibib/src/qcom-mibib.c) - "mr80x-unified" is the
+# only one that exists today. Supporting another board means adding
+# its profile there first, then adding a case entry below mapping its
+# board_name to that profile name; nothing else in this script is
+# MR80X-specific.
+
+. /lib/functions.sh
+. /lib/upgrade/nand.sh
+
+unified_profile=""
+case "$(board_name)" in
+mercusys,mr80x-v2|\
+mercusys,mr80x-v5)
+	unified_profile="mr80x-unified"
+	;;
+esac
+[ -n "$unified_profile" ] || exit 0
+
+mibib_mtdnum="$(find_mtd_index 0:mibib)"
+[ -n "$mibib_mtdnum" ] || exit 0
+mibib_mtd="/dev/mtd$mibib_mtdnum"
+
+out="$(qcom-mibib apply "$mibib_mtd" "$unified_profile" --yes-really 2>&1)"
+echo "$out" | logger -t qcom-mibib-migrate
+
+if ! echo "$out" | grep -q "already uses $unified_profile"; then
+	# MIBIB just switched for the first time this boot. The kernel only
+	# sees the new, larger "rootfs" MTD partition after re-reading the
+	# SMEM partition table at boot, so nothing more can be done until
+	# then. Signal init.d/migrate-reboot (a generic one-shot reboot
+	# trigger, see that script) to reboot once this whole uci-defaults
+	# pass has finished and been committed - calling `reboot` directly
+	# from here would kill /etc/init.d/boot's uci_apply_defaults loop
+	# mid-run, before its own `uci commit` and `rm -f $applied`, which
+	# would make every uci-defaults script that already ran earlier
+	# this same boot re-run again on the next one.
+	touch /tmp/migrate_reboot_pending
+	exit 0
+fi
+
+# Second pass, after that reboot (or the device was already unified for
+# some other reason): grow rootfs_data into whatever space qcom-mibib
+# reclaimed from the old profile. A no-op if there is none.
+rootfs_ubidev="$(nand_find_ubi rootfs)"
+[ -n "$rootfs_ubidev" ] || exit 0
+
+data_vol="$(nand_find_volume "$rootfs_ubidev" rootfs_data)"
+[ -n "$data_vol" ] || exit 0
+
+avail="$(cat "/sys/class/ubi/$rootfs_ubidev/avail_eraseblocks" 2>/dev/null)"
+reserved="$(cat "/sys/class/ubi/$data_vol/reserved_ebs" 2>/dev/null)"
+if [ -n "$avail" ] && [ "$avail" -gt 0 ] && [ -n "$reserved" ]; then
+	ubirsvol "/dev/$rootfs_ubidev" -N rootfs_data \
+		-S "$((reserved + avail))" 2>&1 | logger -t qcom-mibib-migrate
+fi
+
+exit 0
