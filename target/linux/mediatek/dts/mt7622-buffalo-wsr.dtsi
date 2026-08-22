@@ -130,7 +130,7 @@
 	eth_pins: eth-pins {
 		mux {
 			function = "eth";
-			groups = "mdc_mdio", "rgmii_via_gmac2";
+			groups = "mdc_mdio";
 		};
 	};
 
