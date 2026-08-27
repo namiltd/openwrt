@@ -1,0 +1,193 @@
+From c91d3c98ba91b3d559a9ab28635e1d7797570de0 Mon Sep 17 00:00:00 2001
+From: Fabiano Tassotti <fabianotassotti@gmail.com>
+Date: Mon, 17 Aug 2026 23:51:41 +0200
+Subject: [PATCH 7/7] net: dsa: realtek: add family D SDS13 PCS support
+
+Extend the existing RTL8367S SGMII/HSGMII PCS implementation in this
+driver for family D switches, whose CPU-facing SerDes (referred to as
+"SDS13" in the vendor RTL8367D port API) is reached by redirecting the
+shared, unindexed SDS_INDACS window through the MAC6_SEL_SDS0 bit in
+RTL8365MB_SDS_MISC_REG, and whose SDS_MISC fields otherwise differ from
+family C.
+
+The register sequence and tuning tables are derived from the GPL-licensed
+Realtek RTL8367D port API distributed in the Mercusys MR80X GPL release.
+Keep the existing family C path and the existing rtl8365mb_sds_write()/
+rtl8365mb_sds_read() helpers unchanged - family D reuses them as-is
+after the MAC6_SEL_SDS0 redirect, rather than introducing an indexed
+variant of the SDS_INDACS window. Select the new behavior from the
+driver's chip-family metadata, making the implementation reusable by
+other family D boards.
+
+Signed-off-by: Fabiano Tassotti <fabianotassotti@gmail.com>
+---
+ drivers/net/dsa/realtek/rtl8365mb_main.c | 114 ++++++++++++++++++++++-
+ 1 file changed, 113 insertions(+), 1 deletion(-)
+
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -317,6 +317,22 @@
+ #define   RTL8365MB_SDS_OPTION_ARM_KEY		0x0249
+ #define RTL8365MB_SDS_OPTION_REG		0x13C1
+ 
++/* Family D reaches its CPU-facing SerDes (called "SDS13" in the vendor
++ * RTL8367D port API) through the same, unindexed SDS_INDACS window used
++ * above. Setting MAC6_SEL_SDS0 here redirects that shared window to the
++ * family-D SerDes instance instead of an index being passed to
++ * rtl8365mb_sds_write()/rtl8365mb_sds_read() directly.
++ */
++#define RTL8365MB_D_FIBER_CFG2_REG			0x13E8
++#define   RTL8365MB_D_FIBER_CFG2_RX_DISABLE_MASK	GENMASK(7, 6)
++#define   RTL8365MB_D_FIBER_CFG2_RX_DISABLE_SDS0	BIT(6)
++#define RTL8365MB_D_SDS_MISC_PA33PC_EN		BIT(11)
++#define RTL8365MB_D_SDS_MISC_PA12PC_EN		BIT(10)
++#define RTL8365MB_D_SDS_MISC_MAC6_SEL_SDS0		BIT(9)
++#define RTL8365MB_D_SDS_MISC_MODE_MASK		GENMASK(4, 0)
++#define RTL8365MB_D_SDS_MISC_MODE_SGMII		0x02
++#define RTL8365MB_D_SDS_MISC_MODE_HSGMII		0x12
++
+ /* Embedded DW8051 microcontroller control registers. The microcontroller
+  * can run firmware to manage the SerDes link, but this driver keeps it in
+  * reset and disabled: phylink already performs the link management that
+@@ -691,6 +707,21 @@ static const struct rtl8365mb_jam_tbl_en
+ 	{ 0x0424, 0xD810 }, { 0x0001, 0x0F80 }, { 0x002E, 0x83F2 },
+ };
+ 
++/* Family D tuning tables from the Realtek vendor port API. */
++static const struct rtl8365mb_jam_tbl_entry rtl8365mb_d_sds_jam_sgmii[] = {
++	{ 0x0427, 0x4E0C }, { 0x0428, 0xAA00 }, { 0x0425, 0x5189 },
++	{ 0x0424, 0x8414 }, { 0x0423, 0x1020 }, { 0x0410, 0x0002 },
++	{ 0x0484, 0x011B }, { 0x0421, 0x8E13 }, { 0x0422, 0x1140 },
++	{ 0x0004, 0x074F },
++};
++
++static const struct rtl8365mb_jam_tbl_entry rtl8365mb_d_sds_jam_hsgmii[] = {
++	{ 0x0427, 0x4E0C }, { 0x0428, 0xAA00 }, { 0x0425, 0x5189 },
++	{ 0x0424, 0x8414 }, { 0x0423, 0x1020 }, { 0x0410, 0x0002 },
++	{ 0x0504, 0x051B }, { 0x0421, 0x8E13 }, { 0x0422, 0x1140 },
++	{ 0x0004, 0x074F },
++};
++
+ enum rtl8365mb_phy_interface_mode {
+ 	RTL8365MB_PHY_INTERFACE_MODE_INVAL = 0,
+ 	RTL8365MB_PHY_INTERFACE_MODE_INTERNAL = BIT(0),
+@@ -1311,6 +1342,14 @@ static int rtl8365mb_sds_probe_option(st
+ 	int ret;
+ 	int i;
+ 
++	/* Family D has a fixed SDS13 programming model and does not use the
++	 * family C option register to select its tuning table.
++	 */
++	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D) {
++		mb->sds_supported = true;
++		return 0;
++	}
++
+ 	/* Nothing to probe if no external interface is wired to the SerDes */
+ 	for (i = 0; i < RTL8365MB_MAX_NUM_EXTINTS; i++) {
+ 		extint = &mb->chip_info->extints[i];
+@@ -1347,6 +1386,57 @@ static int rtl8365mb_sds_probe_option(st
+ 	return 0;
+ }
+ 
++/* RTL8367S-VB / family D SerDes PCS configuration. Redirects the shared,
++ * unindexed SDS_INDACS window to the CPU-facing SerDes instance via
++ * MAC6_SEL_SDS0 before applying the family-D tuning table, using the same
++ * rtl8365mb_sds_write() helper as the family-C path below.
++ */
++static int rtl8365mb_d_pcs_config(struct realtek_priv *priv,
++				  phy_interface_t interface)
++{
++	const struct rtl8365mb_jam_tbl_entry *sds_jam;
++	size_t sds_jam_size;
++	u32 mode;
++	int ret;
++	int i;
++
++	if (interface == PHY_INTERFACE_MODE_2500BASEX) {
++		sds_jam = rtl8365mb_d_sds_jam_hsgmii;
++		sds_jam_size = ARRAY_SIZE(rtl8365mb_d_sds_jam_hsgmii);
++		mode = RTL8365MB_D_SDS_MISC_MODE_HSGMII;
++	} else {
++		sds_jam = rtl8365mb_d_sds_jam_sgmii;
++		sds_jam_size = ARRAY_SIZE(rtl8365mb_d_sds_jam_sgmii);
++		mode = RTL8365MB_D_SDS_MISC_MODE_SGMII;
++	}
++
++	ret = regmap_update_bits(priv->map, RTL8365MB_SDS_MISC_REG,
++				 RTL8365MB_D_SDS_MISC_MAC6_SEL_SDS0,
++				 RTL8365MB_D_SDS_MISC_MAC6_SEL_SDS0);
++	if (ret)
++		return ret;
++
++	for (i = 0; i < sds_jam_size; i++) {
++		ret = rtl8365mb_sds_write(priv, sds_jam[i].reg,
++					   sds_jam[i].val);
++		if (ret)
++			return ret;
++	}
++
++	ret = regmap_update_bits(priv->map, RTL8365MB_D_FIBER_CFG2_REG,
++				 RTL8365MB_D_FIBER_CFG2_RX_DISABLE_MASK,
++				 RTL8365MB_D_FIBER_CFG2_RX_DISABLE_SDS0);
++	if (ret)
++		return ret;
++
++	return regmap_update_bits(priv->map, RTL8365MB_SDS_MISC_REG,
++				  RTL8365MB_D_SDS_MISC_PA33PC_EN |
++				  RTL8365MB_D_SDS_MISC_PA12PC_EN |
++				  RTL8365MB_D_SDS_MISC_MODE_MASK,
++				  RTL8365MB_D_SDS_MISC_PA33PC_EN |
++				  RTL8365MB_D_SDS_MISC_PA12PC_EN | mode);
++}
++
+ /* The vendor driver raises the port 6 ingress and egress rate limiters to
+  * their maximum in its switch init, unconditionally for the whole chip
+  * family. The chip reset in rtl8365mb_setup() puts them back to their reset
+@@ -1437,6 +1527,9 @@ static int rtl8365mb_pcs_config(struct p
+ 	if (ret)
+ 		return ret;
+ 
++	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D)
++		return rtl8365mb_d_pcs_config(priv, interface);
++
+ 	/* Tune the SerDes with vendor-prescribed parameters */
+ 	for (i = 0; i < sds_jam_size; i++) {
+ 		ret = rtl8365mb_sds_write(priv, sds_jam[i].reg,
+@@ -1542,6 +1635,13 @@ static void rtl8365mb_pcs_get_state(stru
+ 	if (!state->link)
+ 		return;
+ 
++	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D) {
++		state->duplex = DUPLEX_FULL;
++		state->speed = state->interface == PHY_INTERFACE_MODE_2500BASEX ?
++				SPEED_2500 : SPEED_1000;
++		return;
++	}
++
+ 	/* The speed and duplex are forced; read them back from the values
+ 	 * programmed into the SerDes MISC register.
+ 	 */
+@@ -1583,6 +1683,12 @@ static void rtl8365mb_pcs_link_up(struct
+ 	u32 r_speed;
+ 	int ret;
+ 
++	/* Family D forces the external MAC ability from mac_link_up(); its
++	 * SDS_MISC fields do not share the family C link-force layout.
++	 */
++	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D)
++		return;
++
+ 	/* The speed field has no value for 2.5 Gbps: the rate is determined by
+ 	 * the HSGMII SerDes configuration, and the vendor driver programs the
+ 	 * 1 Gbps value here.
+@@ -1898,7 +2004,8 @@ static void rtl8365mb_phylink_mac_link_u
+ 		 * rtl8365mb_pcs_link_up() because pcs_link_up() carries no
+ 		 * pause information.
+ 		 */
+-		if (rtl8365mb_interface_is_serdes(interface)) {
++		if (rtl8365mb_interface_is_serdes(interface) &&
++		    rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_C) {
+ 			u32 val = 0;
+ 
+ 			if (tx_pause)
