@@ -1,0 +1,180 @@
+--- a/drivers/crypto/inside-secure/eip93/eip93-aead.c
++++ b/drivers/crypto/inside-secure/eip93/eip93-aead.c
+@@ -81,8 +81,9 @@ static void eip93_aead_cra_exit(struct c
+ {
+ 	struct eip93_crypto_ctx *ctx = crypto_tfm_ctx(tfm);
+ 
+-	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base,
+-			 sizeof(*ctx->sa_record), DMA_TO_DEVICE);
++	if (ctx->sa_record_base)
++		dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base,
++				 sizeof(*ctx->sa_record), DMA_TO_DEVICE);
+ 	kfree(ctx->sa_record);
+ }
+ 
+--- a/drivers/crypto/inside-secure/eip93/eip93-cipher.c
++++ b/drivers/crypto/inside-secure/eip93/eip93-cipher.c
+@@ -88,8 +88,9 @@ static void eip93_skcipher_cra_exit(stru
+ {
+ 	struct eip93_crypto_ctx *ctx = crypto_tfm_ctx(tfm);
+ 
+-	dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base,
+-			 sizeof(*ctx->sa_record), DMA_TO_DEVICE);
++	if (ctx->sa_record_base)
++		dma_unmap_single(ctx->eip93->dev, ctx->sa_record_base,
++				 sizeof(*ctx->sa_record), DMA_TO_DEVICE);
+ 	kfree(ctx->sa_record);
+ 
+ 	crypto_free_skcipher(ctx->fallback);
+--- a/drivers/crypto/inside-secure/eip93/eip93-common.c
++++ b/drivers/crypto/inside-secure/eip93/eip93-common.c
+@@ -527,6 +527,8 @@ int eip93_send_req(struct crypto_async_r
+ 
+ 	rctx->sa_state_ctr = NULL;
+ 	rctx->sa_state = NULL;
++	rctx->sa_state_ctr_base = 0;
++	rctx->sa_state_base = 0; 
+ 
+ 	if (IS_ECB(flags))
+ 		goto skip_iv;
+--- a/drivers/crypto/inside-secure/eip93/eip93-hash.c
++++ b/drivers/crypto/inside-secure/eip93/eip93-hash.c
+@@ -34,7 +34,7 @@ static void eip93_hash_free_data_blocks(
+ 	if (!list_empty(&rctx->blocks))
+ 		INIT_LIST_HEAD(&rctx->blocks);
+ 
+-	if (rctx->finalize)
++	if (rctx->finalize && rctx->data_dma)
+ 		dma_unmap_single(eip93->dev, rctx->data_dma,
+ 				 rctx->data_used,
+ 				 DMA_TO_DEVICE);
+@@ -47,12 +47,13 @@ static void eip93_hash_free_sa_record(st
+ 	struct eip93_hash_ctx *ctx = crypto_ahash_ctx(ahash);
+ 	struct eip93_device *eip93 = ctx->eip93;
+ 
+-	if (IS_HMAC(ctx->flags))
++	if (IS_HMAC(ctx->flags) && rctx->sa_record_hmac_base)
+ 		dma_unmap_single(eip93->dev, rctx->sa_record_hmac_base,
+ 				 sizeof(rctx->sa_record_hmac), DMA_TO_DEVICE);
+ 
+-	dma_unmap_single(eip93->dev, rctx->sa_record_base,
+-			 sizeof(rctx->sa_record), DMA_TO_DEVICE);
++	if (rctx->sa_record_base)
++		dma_unmap_single(eip93->dev, rctx->sa_record_base,
++				 sizeof(rctx->sa_record), DMA_TO_DEVICE);
+ }
+ 
+ void eip93_hash_handle_result(struct crypto_async_request *async, int err)
+@@ -66,8 +67,9 @@ void eip93_hash_handle_result(struct cry
+ 	struct eip93_device *eip93 = ctx->eip93;
+ 	int i;
+ 
+-	dma_unmap_single(eip93->dev, rctx->sa_state_base,
+-			 sizeof(*sa_state), DMA_FROM_DEVICE);
++	if (rctx->sa_state_base)
++		dma_unmap_single(eip93->dev, rctx->sa_state_base,
++				 sizeof(*sa_state), DMA_FROM_DEVICE);
+ 
+ 	/*
+ 	 * With partial_hash assume SHA256_DIGEST_SIZE buffer is passed.
+@@ -200,6 +202,10 @@ static void __eip93_hash_init(struct aha
+ 
+ 	rctx->len = 0;
+ 	rctx->data_used = 0;
++	rctx->sa_record_base = 0;
++	rctx->sa_state_base = 0;
++	rctx->sa_record_hmac_base = 0;
++	rctx->data_dma = 0;
+ 	rctx->partial_hash = false;
+ 	rctx->finalize = false;
+ 	INIT_LIST_HEAD(&rctx->blocks);
+@@ -250,8 +256,10 @@ static int eip93_send_hash_req(struct cr
+ 									   sizeof(*sa_record_hmac),
+ 									   DMA_TO_DEVICE);
+ 				ret = dma_mapping_error(eip93->dev, rctx->sa_record_hmac_base);
+-				if (ret)
++				if (ret) {
++					rctx->sa_record_hmac_base = 0;
+ 					return ret;
++				}
+ 
+ 				cdesc.sa_addr = rctx->sa_record_hmac_base;
+ 			}
+@@ -290,6 +298,10 @@ static int eip93_hash_init(struct ahash_
+ 	struct eip93_hash_ctx *ctx = crypto_ahash_ctx(ahash);
+ 	struct sa_state *sa_state = &rctx->sa_state;
+ 
++	if (IS_HMAC(ctx->flags) &&
++	    (memchr_inv(ctx->ipad, 0, SHA256_BLOCK_SIZE) == NULL))
++			return -EINVAL;
++
+ 	memset(sa_state->state_byte_cnt, 0, sizeof(u32) * 2);
+ 	eip93_hash_init_sa_state_digest(ctx->flags & EIP93_HASH_MASK,
+ 					sa_state->state_i_digest);
+@@ -420,12 +432,14 @@ static int eip93_hash_update(struct ahas
+ 	return ret;
+ 
+ free_sa_record:
+-	dma_unmap_single(eip93->dev, rctx->sa_record_base,
+-			 sizeof(*sa_record), DMA_TO_DEVICE);
++	if (rctx->sa_record_base)
++		dma_unmap_single(eip93->dev, rctx->sa_record_base,
++				 sizeof(*sa_record), DMA_TO_DEVICE);
+ 
+ free_sa_state:
+-	dma_unmap_single(eip93->dev, rctx->sa_state_base,
+-			 sizeof(*sa_state), DMA_TO_DEVICE);
++	if (rctx->sa_state_base)
++		dma_unmap_single(eip93->dev, rctx->sa_state_base,
++				 sizeof(*sa_state), DMA_TO_DEVICE);
+ 
+ 	return ret;
+ }
+@@ -501,12 +515,14 @@ static int __eip93_hash_final(struct aha
+ free_blocks:
+ 	eip93_hash_free_data_blocks(req);
+ 
+-	dma_unmap_single(eip93->dev, rctx->sa_record_base,
+-			 sizeof(*sa_record), DMA_TO_DEVICE);
++	if (rctx->sa_record_base)
++		dma_unmap_single(eip93->dev, rctx->sa_record_base,
++				 sizeof(*sa_record), DMA_TO_DEVICE);
+ 
+ free_sa_state:
+-	dma_unmap_single(eip93->dev, rctx->sa_state_base,
+-			 sizeof(*sa_state), DMA_TO_DEVICE);
++	if (rctx->sa_state_base)
++		dma_unmap_single(eip93->dev, rctx->sa_state_base,
++				 sizeof(*sa_state), DMA_TO_DEVICE);
+ 
+ 	return ret;
+ }
+@@ -549,11 +565,13 @@ static int eip93_hash_finup(struct ahash
+ 	return __eip93_hash_final(req, false);
+ 
+ free_sa_record:
+-	dma_unmap_single(eip93->dev, rctx->sa_record_base,
+-			 sizeof(*sa_record), DMA_TO_DEVICE);
++	if (rctx->sa_record_base)
++		dma_unmap_single(eip93->dev, rctx->sa_record_base,
++				 sizeof(*sa_record), DMA_TO_DEVICE);
+ free_sa_state:
+-	dma_unmap_single(eip93->dev, rctx->sa_state_base,
+-			 sizeof(*sa_state), DMA_TO_DEVICE);
++	if (rctx->sa_state_base)
++		dma_unmap_single(eip93->dev, rctx->sa_state_base,
++				 sizeof(*sa_state), DMA_TO_DEVICE);
+ 
+ 	return ret;
+ }
+--- a/drivers/crypto/inside-secure/eip93/eip93-main.c
++++ b/drivers/crypto/inside-secure/eip93/eip93-main.c
+@@ -433,6 +433,8 @@ static int eip93_crypto_probe(struct pla
+ 	ret = devm_request_threaded_irq(eip93->dev, eip93->irq, eip93_irq_handler,
+ 					NULL, IRQF_ONESHOT,
+ 					dev_name(eip93->dev), eip93);
++	if (ret)
++		return ret;
+ 
+ 	eip93->ring = devm_kcalloc(eip93->dev, 1, sizeof(*eip93->ring), GFP_KERNEL);
+ 	if (!eip93->ring)
