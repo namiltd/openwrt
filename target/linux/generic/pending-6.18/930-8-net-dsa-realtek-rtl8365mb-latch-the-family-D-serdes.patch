@@ -1,0 +1,145 @@
+From: krics <krics@localhost>
+Date: Thu, 3 Sep 2026 22:30:00 +0200
+Subject: [PATCH 8/8] net: dsa: realtek: rtl8365mb: latch the family D SerDes
+
+With 930-1..930-7 the trunk on a TP-Link Archer AX55 v1 (IPQ5018 +
+RTL8367S-VB) reports 2.5Gbps/Full on both sides but moves no frames: the
+CPU MAC transmits, s00_p06_ifInOctets stays at zero and so does
+mmc_rx_framecount_gb, with no CRC, alignment or FIFO errors anywhere.
+
+Three things are still missing, all from what the stock firmware does in
+dal_rtl8367d_port_macForceLinkExt_set() and sgmiiNway_set():
+
+  - 0x1D12 is never programmed. Stock writes the same value to both
+    0x1D11 and 0x1D12; setting only 0x1D11 leaves the receiver hunting.
+
+  - The receiver latches on a DISABLE -> HSGMII transition rather than
+    on the value, so writing 0x0E12 into a register that already reads
+    0x0E12 does nothing.
+
+  - 0x1D78 (SDS1_MISC0) has to stay at 0x001F. The vendor HSGMII branch
+    that programs it is reached only for EXT_PORT1; EXT_PORT0 runs
+    through SDS0.
+
+The transition also has to be repeated once the UNIPHY on the SoC side
+has been up for a while, together with bit 8 of SDS register 2 -
+sgmiiNway_set() clears NWAY_EN and sets that bit, while pcs_config()
+only clears NWAY_EN. Done from pcs_config() the link latches and drops
+again within a second or two; around 25 s into boot it holds, so it runs
+as delayed work. That part is a workaround rather than a fix: driving it
+from a link event would be better, but I could not work out which one.
+
+Bisected by reverting each piece in turn on a clean tree. Without the
+delayed relatch the trunk carries nothing; the same is true without the
+UNIPHY change that accompanies this (CH_FORCE_MODE cleared for
+2500base-x). Clearing NCTL_EN turned out not to be needed once 0x1D11 is
+programmed instead of 0x1D78.
+
+Signed-off-by: krics <krics@localhost>
+---
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -331,6 +331,8 @@
+ #define RTL8365MB_D_SDS_MISC_MODE_SGMII			0x02
+ #define RTL8365MB_D_SDS_MISC_MODE_HSGMII		0x12
+ 
++#define RTL8365MB_D_SDS_NWAY_LINK_MASK			0x0100
++
+ /* Embedded DW8051 microcontroller control registers. The microcontroller
+  * can run firmware to manage the SerDes link, but this driver keeps it in
+  * reset and disabled: phylink already performs the link management that
+@@ -929,6 +931,7 @@
+ 	struct rtl8365mb_port ports[RTL8365MB_MAX_NUM_PORTS];
+ 	struct phylink_pcs pcs;
+ 	bool sds_supported;
++	struct delayed_work sds_relatch;
+ };
+ 
+ #define pcs_to_rtl8365mb(_pcs) container_of((_pcs), struct rtl8365mb, pcs)
+@@ -1534,11 +1537,26 @@
+ 			    RTL8365MB_SDS_MISC_MAC8_SEL_HSGMII_MASK;
+ 	}
+ 
+-	ret = regmap_update_bits(priv->map, RTL8365MB_SDS_MISC_REG,
+-				 misc_mask, misc_val);
++	ret = regmap_update_bits(priv->map, RTL8365MB_SDS_MISC_REG, misc_mask, misc_val);
+ 	if (ret)
+ 		return ret;
+ 
++	if (is_d) {
++		/* Stock programs BOTH 0x1D11 and 0x1D12 with the same value,
++		 * and the receiver latches on a DISABLE -> HSGMII transition
++		 * rather than on the value. It also leaves SDS1 (0x1D78)
++		 * disabled: the vendor branch that programs it is EXT_PORT1.
++		 */
++		regmap_write(priv->map, RTL8365MB_D_REG_SDS1_MISC0, 0x001f);
++
++		regmap_write(priv->map, 0x1d11, 0x021f);
++		regmap_write(priv->map, 0x1d12, 0x021f);
++		msleep(20);
++		regmap_write(priv->map, 0x1d11, 0x0e12);
++		regmap_write(priv->map, 0x1d12, 0x0e12);
++		msleep(100);
++	}
++
+ 	if (!is_d) {
+ 		val = sds_mode << RTL8365MB_DIGITAL_INTERFACE_SELECT_MODE_OFFSET(id);
+ 		ret = regmap_update_bits(priv->map,
+@@ -1594,6 +1612,9 @@
+ 	val &= ~RTL8365MB_SDS_NWAY_EN_MASK;
+ 	val |= RTL8365MB_SDS_NWAY_RESTART_MASK;
+ 
++	if (is_d)
++		val |= RTL8365MB_D_SDS_NWAY_LINK_MASK; /* bit 8 */
++
+ 	return rtl8365mb_sds_write(priv, sds_index,
+ 				   RTL8365MB_SDS_REG_NWAY, val);
+ }
+@@ -3231,6 +3252,32 @@
+ 	return 0;
+ }
+ 
++static void rtl8365mb_sds_relatch_work(struct work_struct *work)
++{
++	struct rtl8365mb *mb = container_of(to_delayed_work(work),
++					    struct rtl8365mb, sds_relatch);
++	struct realtek_priv *priv = mb->priv;
++	u16 v = 0;
++
++	/* The receiver only latches durably once the UNIPHY on the SoC side
++	 * has been running for a while: from pcs_config() (~5 s) the link
++	 * comes up and drops again within a second or two.
++	 */
++	regmap_write(priv->map, 0x1d11, 0x021f);
++	regmap_write(priv->map, 0x1d12, 0x021f);
++	msleep(1000);
++	regmap_write(priv->map, 0x1d11, 0x0e12);
++	regmap_write(priv->map, 0x1d12, 0x0e12);
++	msleep(2000);
++
++	rtl8365mb_sds_write(priv, RTL8365MB_D_SDS_EXT0_INDEX, 0x02, 0x71d0);
++	msleep(100);
++
++	rtl8365mb_sds_read(priv, RTL8365MB_D_SDS_EXT0_INDEX, 0x3d, &v);
++	dev_info(priv->dev, "familyD relatch: sds[3d] = %04x%s\n", v,
++		 (v & 0x10) ? "  LINK" : "");
++}
++
+ static int rtl8365mb_setup(struct dsa_switch *ds)
+ {
+ 	struct realtek_priv *priv = ds->priv;
+@@ -3419,6 +3466,14 @@
+ 	/* Start statistics counter polling */
+ 	rtl8365mb_stats_setup(priv);
+ 
++	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D) {
++		INIT_DELAYED_WORK(&mb->sds_relatch,
++				  rtl8365mb_sds_relatch_work);
++		schedule_delayed_work(&mb->sds_relatch,
++				      msecs_to_jiffies(25000));
++	}
++
++
+ 	return 0;
+ 
+ out_teardown_irq:
