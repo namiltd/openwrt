@@ -1,81 +1,36 @@
-From d12765de2bc16ea6d65112a91943ee706128f8f9 Mon Sep 17 00:00:00 2001
 From: Mieczyslaw Nalewaj <namiltd@yahoo.com>
 Date: Thu, 3 Sep 2026 23:58:21 +0200
-Subject: [PATCH] net: dsa: realtek: rtl8365mb: fix family D SerDes trunk link
+Subject: [PATCH] net: dsa: realtek: rtl8365mb: keep MAC6_SEL_SDS0 set on family D
 
 On a TP-Link Archer AX55 v1 (IPQ5018 + RTL8367S-VB) the trunk reports
 2.5Gbps/Full on both sides but moves no frames: the receiver never
 asserts link (SDS 0x3d stays 0x0100 instead of 0x0111) and nothing
 crosses in either direction, with no CRC, alignment or FIFO errors.
 
-Compared against live stock firmware, two things are missing, both
-inside pcs_config() for family D:
-
- - Bit 9 (0x0200) of SDS_MISC (0x1D11) is never set. Stock programs
-   0x0E12 there; the driver only writes the PA enables and the mode
-   field (0x0C12). Bit 9 is the forced-LINK bit, same position as the
-   family C RTL8365MB_SDS_MISC_SGMII_LINK_MASK.
-
- - The companion register 0x1D12 is never written at all. Stock writes
-   the same value to 0x1D11 and 0x1D12; programming only 0x1D11 leaves
-   the receiver hunting.
-
-Since both registers get the same mask/value, compute misc_mask and
-misc_val once and program both. The DISABLE -> HSGMII edge comes for
-free from the reset defaults, so no extra toggle sequence is needed.
-SDS1 (0x1D78) is intentionally not touched: it stays at its reset
-value 0x001F, the vendor branch programming it applies to EXT_PORT1
-only and this port runs through SDS0.
+MAC6_SEL_SDS0 (bit 9 of SDS_MISC, 0x1D11) is set earlier in pcs_config()
+with its own regmap_update_bits(), but the final update_bits at the end
+of the function uses a mask that does not cover it, so it is cleared
+again on the way out. Stock holds 0x0E12 there - the PA enables, the
+mode field and bit 9 - so add bit 9 to the mask and value that are
+written last.
 
 Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+[krics: dropped the 0x1D12 writes, that register does not decode; renamed
+ the bit-9 reference to the existing MAC6_SEL_SDS0 define]
 ---
- drivers/net/dsa/realtek/rtl8365mb_main.c | 21 +++++++++++++++++++--
- 1 file changed, 19 insertions(+), 2 deletions(-)
-
-diff --git a/drivers/net/dsa/realtek/rtl8365mb_main.c b/drivers/net/dsa/realtek/rtl8365mb_main.c
-index b1e46c7..e0c1893 100644
 --- a/drivers/net/dsa/realtek/rtl8365mb_main.c
 +++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
-@@ -284,6 +284,11 @@
- #define   RTL8365MB_SDS_MISC_SGMII_SPD_MASK		0x0180
- #define   RTL8365MB_SDS_MISC_MAC8_SEL_SGMII_MASK	0x0040
- 
-+#define RTL8365MB_D_REG_SDS_MISC2			0x1D12
-+
-+/* Forced-LINK bit, same position as RTL8365MB_SDS_MISC_SGMII_LINK_MASK */
-+#define RTL8365MB_D_SDS_MISC_LINK_MASK			0x0200
-+
- /* SerDes internal registers, accessed via the SDS_INDACS registers. The BMCR
-  * data path reset holds BMCR_ANENABLE | BMCR_ISOLATE while toggling the
-  * vendor-specific low bits from phase 1 to phase 2, which triggers a data path
 @@ -1522,9 +1527,11 @@ static int rtl8365mb_pcs_config(struct phylink_pcs *pcs, unsigned int neg_mode,
  
  		misc_mask = RTL8365MB_D_SDS_MISC_PA33PC_EN |
  			    RTL8365MB_D_SDS_MISC_PA12PC_EN |
 -			    RTL8365MB_D_SDS_MISC_MODE_MASK;
 +			    RTL8365MB_D_SDS_MISC_MODE_MASK |
-+			    RTL8365MB_D_SDS_MISC_LINK_MASK;
++			    RTL8365MB_D_SDS_MISC_MAC6_SEL_SDS0;
  		misc_val  = RTL8365MB_D_SDS_MISC_PA33PC_EN |
 -			    RTL8365MB_D_SDS_MISC_PA12PC_EN | sds_mode;
 +			    RTL8365MB_D_SDS_MISC_PA12PC_EN | sds_mode |
-+			    RTL8365MB_D_SDS_MISC_LINK_MASK;
++			    RTL8365MB_D_SDS_MISC_MAC6_SEL_SDS0;
  	} else {
  		/* Mux the SerDes to MAC8 in the requested mode */
  		misc_mask = RTL8365MB_SDS_MISC_MAC8_SEL_SGMII_MASK |
-@@ -1539,6 +1546,16 @@ static int rtl8365mb_pcs_config(struct phylink_pcs *pcs, unsigned int neg_mode,
- 	if (ret)
- 		return ret;
- 
-+	/* Stock programs the companion register 0x1D12 with the same value;
-+	 * programming 0x1D11 alone leaves the receiver hunting.
-+	 */
-+	if (is_d) {
-+		ret = regmap_update_bits(priv->map, RTL8365MB_D_REG_SDS_MISC2,
-+					 misc_mask, misc_val);
-+		if (ret)
-+			return ret;
-+	}
-+
- 	if (!is_d) {
- 		val = sds_mode << RTL8365MB_DIGITAL_INTERFACE_SELECT_MODE_OFFSET(id);
- 		ret = regmap_update_bits(priv->map,
