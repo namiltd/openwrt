@@ -1,0 +1,206 @@
+From: krics <krics@localhost>
+Date: Fri, 4 Sep 2026 15:30:00 +0200
+Subject: [PATCH 9/9] net: dsa: realtek: rtl8365mb: re-latch the family D SerDes
+
+With 930-8 the trunk on a TP-Link Archer AX55 v1 (IPQ5018 + RTL8367S-VB)
+still moves no frames: link is reported at 2.5Gbps/Full on both sides,
+the CPU MAC transmits, and s00_p06_ifInOctets and mmc_rx_framecount_gb
+both stay at zero, with no CRC, alignment or FIFO errors.
+
+The receiver latches on the DISABLE -> HSGMII edge rather than on the
+value in SDS_MISC, and only once the UNIPHY on the SoC side has finished
+its own bring-up. Neither is satisfied where the mode is programmed:
+
+  - The edge does not happen. By the time pcs_config() runs the mode
+    field already holds the target value, so regmap_update_bits() writes
+    nothing. Parking the mode at DISABLE first does produce an edge, but
+    the receiver still does not latch - it is too early.
+
+  - pcs_link_up() is no better: it runs about a millisecond before
+    phylink reports the link. Instrumented, SDS 0x3D reads 0x0100 right
+    after the edge is driven from there.
+
+Driving it later does work. Timing a workqueue against boot: at 25 s, 8 s
+and 3 s it latches on the first attempt, while with no delay the mode
+field still reads 0x021F because pcs_config() has not run yet. So kick
+the work from mac_link_up(), which is the last callback in the chain, and
+redo the edge until SDS 0x3D reports link. Here it takes three attempts,
+latching around 10 s into boot, reproducibly across reboots.
+
+Retries are capped so a board where this never latches does not spin
+forever, and the work is cancelled in teardown().
+
+What changes between a failing and a succeeding attempt is still unknown
+to me - something on the SoC side finishing its bring-up is the obvious
+guess, but nothing I can read in the UNIPHY registers differs between the
+two. A driver-side event to key off would be better than the poll.
+
+Signed-off-by: krics <krics@localhost>
+---
+--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
+@@ -286,6 +286,10 @@
+ 
+ #define RTL8365MB_D_REG_SDS_MISC2			0x1D12
+ 
++/* SerDes status register, reached through the SDS_INDACS window */
++#define RTL8365MB_D_SDS_REG_STATUS			0x3D
++#define   RTL8365MB_D_SDS_STATUS_LINK			0x0010
++
+ /* Forced-LINK bit, same position as RTL8365MB_SDS_MISC_SGMII_LINK_MASK */
+ #define RTL8365MB_D_SDS_MISC_LINK_MASK			0x0200
+ 
+@@ -934,6 +938,8 @@
+ 	struct rtl8365mb_port ports[RTL8365MB_MAX_NUM_PORTS];
+ 	struct phylink_pcs pcs;
+ 	bool sds_supported;
++	struct delayed_work sds_relatch;
++	unsigned int sds_relatch_tries;
+ };
+ 
+ #define pcs_to_rtl8365mb(_pcs) container_of((_pcs), struct rtl8365mb, pcs)
+@@ -1548,10 +1554,31 @@
+ 
+ 	/* Stock programs the companion register 0x1D12 with the same value;
+ 	 * programming 0x1D11 alone leaves the receiver hunting.
++	 *
++	 * The receiver latches on the DISABLE -> HSGMII edge rather than on
++	 * the value, so park the mode field first: regmap_update_bits() is a
++	 * no-op when the register already holds the target value.
+ 	 */
+ 	if (is_d) {
+-		ret = regmap_update_bits(priv->map, RTL8365MB_D_REG_SDS_MISC2,
+-					 misc_mask, misc_val);
++		u32 park = (misc_val & ~RTL8365MB_D_SDS_MISC_MODE_MASK) |
++			   RTL8365MB_D_PORT_SDS_MODE_DISABLE;
++
++		ret = regmap_write(priv->map, RTL8365MB_SDS_MISC_REG, park);
++		if (ret)
++			return ret;
++
++		ret = regmap_write(priv->map, RTL8365MB_D_REG_SDS_MISC2, park);
++		if (ret)
++			return ret;
++
++		usleep_range(20000, 25000);
++
++		ret = regmap_write(priv->map, RTL8365MB_SDS_MISC_REG, misc_val);
++		if (ret)
++			return ret;
++
++		ret = regmap_write(priv->map, RTL8365MB_D_REG_SDS_MISC2,
++				   misc_val);
+ 		if (ret)
+ 			return ret;
+ 	}
+@@ -1714,6 +1741,10 @@
+ 
+ 	/* Family D forces the external MAC ability from mac_link_up(); its
+ 	 * SDS_MISC fields do not share the family C link-force layout.
++	 *
++	 * The SerDes re-latch cannot be driven from here either: this runs
++	 * about a millisecond before phylink reports the link, and the edge
++	 * does not take that early. Kick off the retry work instead.
+ 	 */
+ 	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D)
+ 		return;
+@@ -2023,6 +2054,12 @@
+ 			return;
+ 		}
+ 
++		if (rtl8365mb_interface_is_serdes(interface) &&
++		    rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D) {
++			mb->sds_relatch_tries = 0;
++			schedule_delayed_work(&mb->sds_relatch, 0);
++		}
++
+ 		/* The SerDes has its own pause enables; program them from
+ 		 * the resolved pause modes, as the vendor driver does when
+ 		 * forcing the link on a SerDes external interface. These
+@@ -3248,6 +3285,65 @@
+ 	return 0;
+ }
+ 
++static unsigned int relatch_ms = 0;
++module_param(relatch_ms, uint, 0644);
++
++/* The family D receiver latches on a DISABLE -> HSGMII edge rather than on
++ * the value in SDS_MISC, and only once the UNIPHY on the SoC side has
++ * finished its own bring-up. Both pcs_config() and pcs_link_up() run before
++ * that point, so the edge is redone from here until the receiver reports
++ * link, or until we give up.
++ */
++#define RTL8365MB_D_SDS_RELATCH_TRIES		15
++#define RTL8365MB_D_SDS_RELATCH_INTERVAL_MS	2000
++
++static void rtl8365mb_sds_relatch_work(struct work_struct *work)
++{
++	struct rtl8365mb *mb = container_of(to_delayed_work(work),
++					    struct rtl8365mb, sds_relatch);
++	struct realtek_priv *priv = mb->priv;
++	u32 park, target;
++	u16 status = 0;
++
++	if (regmap_read(priv->map, RTL8365MB_SDS_MISC_REG, &target))
++		return;
++
++	/* pcs_config() has not run yet: nothing to re-latch. */
++	if ((target & RTL8365MB_D_SDS_MISC_MODE_MASK) ==
++	    RTL8365MB_D_PORT_SDS_MODE_DISABLE)
++		goto again;
++
++	park = (target & ~RTL8365MB_D_SDS_MISC_MODE_MASK) |
++	       RTL8365MB_D_PORT_SDS_MODE_DISABLE;
++
++	regmap_write(priv->map, RTL8365MB_SDS_MISC_REG, park);
++	regmap_write(priv->map, RTL8365MB_D_REG_SDS_MISC2, park);
++	msleep(20);
++	regmap_write(priv->map, RTL8365MB_SDS_MISC_REG, target);
++	regmap_write(priv->map, RTL8365MB_D_REG_SDS_MISC2, target);
++	msleep(200);
++
++	if (rtl8365mb_sds_read(priv, RTL8365MB_D_SDS_EXT0_INDEX,
++			       RTL8365MB_D_SDS_REG_STATUS, &status))
++		return;
++
++	if (status & RTL8365MB_D_SDS_STATUS_LINK) {
++		dev_dbg(priv->dev, "SerDes latched after %u attempt(s)\n",
++			mb->sds_relatch_tries + 1);
++		return;
++	}
++
++again:
++	if (++mb->sds_relatch_tries >= RTL8365MB_D_SDS_RELATCH_TRIES) {
++		dev_warn(priv->dev,
++			 "SerDes did not latch, trunk will stay down\n");
++		return;
++	}
++
++	schedule_delayed_work(&mb->sds_relatch,
++			      msecs_to_jiffies(RTL8365MB_D_SDS_RELATCH_INTERVAL_MS));
++}
++
+ static int rtl8365mb_setup(struct dsa_switch *ds)
+ {
+ 	struct realtek_priv *priv = ds->priv;
+@@ -3436,6 +3532,10 @@
+ 	/* Start statistics counter polling */
+ 	rtl8365mb_stats_setup(priv);
+ 
++	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D)
++		INIT_DELAYED_WORK(&mb->sds_relatch,
++				  rtl8365mb_sds_relatch_work);
++
+ 	return 0;
+ 
+ out_teardown_irq:
+@@ -3448,6 +3548,9 @@
+ static void rtl8365mb_teardown(struct dsa_switch *ds)
+ {
+ 	struct realtek_priv *priv = ds->priv;
++	struct rtl8365mb *mb = priv->chip_data;
++
++	cancel_delayed_work_sync(&mb->sds_relatch);
+ 
+ 	rtl8365mb_stats_teardown(priv);
+ 	rtl8365mb_irq_teardown(priv);
