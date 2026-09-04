@@ -1,11 +1,11 @@
 From: krics <krics@localhost>
-Date: Fri, 4 Sep 2026 23:00:00 +0200
+Date: Fri, 4 Sep 2026 23:30:00 +0200
 Subject: [PATCH] net: dsa: realtek: rtl8365mb: re-latch the family D SerDes
 
-With 930-8 the trunk on a TP-Link Archer AX55 v1 (IPQ5018 + RTL8367S-VB)
-still moves no frames: link is reported at 2.5Gbps/Full on both sides,
-the CPU MAC transmits, and s00_p06_ifInOctets and mmc_rx_framecount_gb
-both stay at zero, with no CRC, alignment or FIFO errors.
+With the previous patch the trunk on a TP-Link Archer AX55 v1 (IPQ5018 +
+RTL8367S-VB) still moves no frames: link is reported at 2.5Gbps/Full on
+both sides, the CPU MAC transmits, and s00_p06_ifInOctets and
+mmc_rx_framecount_gb both stay at zero.
 
 The receiver latches on the DISABLE -> HSGMII edge in SDS_MISC rather
 than on the value, and only once the UNIPHY on the SoC side has finished
@@ -28,21 +28,23 @@ edge until SDS 0x3D reports link. Here it takes three attempts, latching
 around 10 s into boot, reproducibly across reboots.
 
 Retries are capped so a board where this never latches does not spin
-forever, and the work is cancelled in teardown().
+forever. The work is cancelled in teardown(), and again from
+mac_link_up() before the counter is reset, since a flapping link re-arms
+the sequence while an attempt may still be sleeping inside it.
 
-Two caveats. SDS 0x3D bit 4 turned out to be a weak health indicator: in
-runs where the trunk carried nothing it still came up, so the loop can
-stop early on a link that does not work. And what changes between a
-failing and a succeeding attempt is unknown to me - something on the SoC
-side finishing its bring-up is the obvious guess, but nothing I can read
-in the UNIPHY registers differs between the two. A driver-side event to
-key off would be better than the poll.
+Two caveats. SDS 0x3D bit 4 is a weak health indicator: in runs where the
+trunk carried nothing it still came up, so the loop can stop early on a
+link that does not work. And what changes between a failing and a
+succeeding attempt is unknown to me - something on the SoC side finishing
+its bring-up is the obvious guess, but nothing I can read in the UNIPHY
+registers differs between the two. A driver-side event to key off would
+be better than the poll.
 
 Signed-off-by: krics <krics@localhost>
 ---
 --- a/drivers/net/dsa/realtek/rtl8365mb_main.c
 +++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
-@@ -284,6 +284,12 @@
+@@ -284,6 +284,11 @@
  #define   RTL8365MB_SDS_MISC_SGMII_SPD_MASK		0x0180
  #define   RTL8365MB_SDS_MISC_MAC8_SEL_SGMII_MASK	0x0040
  
@@ -51,11 +53,10 @@ Signed-off-by: krics <krics@localhost>
 +#define RTL8365MB_D_SDS_REG_STATUS			0x3D
 +#define   RTL8365MB_D_SDS_STATUS_LINK			0x0010
 +
-+
  /* SerDes internal registers, accessed via the SDS_INDACS registers. The BMCR
   * data path reset holds BMCR_ANENABLE | BMCR_ISOLATE while toggling the
   * vendor-specific low bits from phase 1 to phase 2, which triggers a data path
-@@ -929,6 +935,8 @@
+@@ -929,6 +934,8 @@
  	struct rtl8365mb_port ports[RTL8365MB_MAX_NUM_PORTS];
  	struct phylink_pcs pcs;
  	bool sds_supported;
@@ -64,16 +65,18 @@ Signed-off-by: krics <krics@localhost>
  };
  
  #define pcs_to_rtl8365mb(_pcs) container_of((_pcs), struct rtl8365mb, pcs)
-@@ -1541,6 +1549,30 @@
+@@ -1541,6 +1548,31 @@
  	if (ret)
  		return ret;
  
-+	/* Stock programs the companion register 0x1D12 with the same value;
-+	 * programming 0x1D11 alone leaves the receiver hunting.
-+	 *
-+	 * The receiver latches on the DISABLE -> HSGMII edge rather than on
++	/* The receiver latches on the DISABLE -> HSGMII edge rather than on
 +	 * the value, so park the mode field first: regmap_update_bits() is a
 +	 * no-op when the register already holds the target value.
++	 *
++	 * These are full writes rather than update_bits: misc_val carries
++	 * every field of SDS_MISC that matters here (the PA enables,
++	 * MAC6_SEL_SDS0 and the mode), and comes out as 0x0E12 - the same
++	 * value the stock firmware holds with the trunk up.
 +	 */
 +	if (is_d) {
 +		u32 park = (misc_val & ~RTL8365MB_D_SDS_MISC_MODE_MASK) |
@@ -82,7 +85,6 @@ Signed-off-by: krics <krics@localhost>
 +		ret = regmap_write(priv->map, RTL8365MB_SDS_MISC_REG, park);
 +		if (ret)
 +			return ret;
-+
 +
 +		usleep_range(20000, 25000);
 +
@@ -106,26 +108,32 @@ Signed-off-by: krics <krics@localhost>
  	 */
  	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D)
  		return;
-@@ -2008,6 +2044,12 @@
+@@ -2008,6 +2044,21 @@
  			return;
  		}
  
++		/* The work sleeps inside the sequence, so stop an attempt
++		 * still in flight before re-arming. Only a genuinely new
++		 * link event resets the budget: re-arming mid-attempt would
++		 * let a flapping link defeat the retry cap entirely, and the
++		 * attempt itself parks the mode for 20 ms, which can be what
++		 * makes the link flap in the first place.
++		 */
 +		if (rtl8365mb_interface_is_serdes(interface) &&
 +		    rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D) {
-+			mb->sds_relatch_tries = 0;
++			if (!cancel_delayed_work_sync(&mb->sds_relatch))
++				mb->sds_relatch_tries = 0;
++
 +			schedule_delayed_work(&mb->sds_relatch, 0);
 +		}
 +
  		/* The SerDes has its own pause enables; program them from
  		 * the resolved pause modes, as the vendor driver does when
  		 * forcing the link on a SerDes external interface. These
-@@ -3233,6 +3275,63 @@
+@@ -3233,6 +3284,60 @@
  	return 0;
  }
  
-+static unsigned int relatch_ms = 0;
-+module_param(relatch_ms, uint, 0644);
-+
 +/* The family D receiver latches on a DISABLE -> HSGMII edge rather than on
 + * the value in SDS_MISC, and only once the UNIPHY on the SoC side has
 + * finished its own bring-up. Both pcs_config() and pcs_link_up() run before
@@ -183,24 +191,25 @@ Signed-off-by: krics <krics@localhost>
  static int rtl8365mb_setup(struct dsa_switch *ds)
  {
  	struct realtek_priv *priv = ds->priv;
-@@ -3421,6 +3520,10 @@
- 	/* Start statistics counter polling */
- 	rtl8365mb_stats_setup(priv);
+@@ -3254,6 +3359,10 @@
+ 	 */
+ 	mb->pcs.poll = true;
  
 +	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D)
 +		INIT_DELAYED_WORK(&mb->sds_relatch,
 +				  rtl8365mb_sds_relatch_work);
 +
- 	return 0;
- 
- out_teardown_irq:
-@@ -3433,6 +3536,9 @@
+ 	ret = rtl8365mb_reset_chip(priv);
+ 	if (ret) {
+ 		dev_err(priv->dev, "failed to reset chip: %pe\n",
+@@ -3433,6 +3542,10 @@
  static void rtl8365mb_teardown(struct dsa_switch *ds)
  {
  	struct realtek_priv *priv = ds->priv;
 +	struct rtl8365mb *mb = priv->chip_data;
 +
-+	cancel_delayed_work_sync(&mb->sds_relatch);
++	if (rtl8365mb_get_family(priv) == RTL8365MB_FAMILY_D)
++		cancel_delayed_work_sync(&mb->sds_relatch);
  
  	rtl8365mb_stats_teardown(priv);
  	rtl8365mb_irq_teardown(priv);

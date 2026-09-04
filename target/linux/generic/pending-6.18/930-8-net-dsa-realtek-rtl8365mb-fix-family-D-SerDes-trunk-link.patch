@@ -3,20 +3,26 @@ Date: Thu, 3 Sep 2026 23:58:21 +0200
 Subject: [PATCH] net: dsa: realtek: rtl8365mb: keep MAC6_SEL_SDS0 set on family D
 
 On a TP-Link Archer AX55 v1 (IPQ5018 + RTL8367S-VB) the trunk reports
-2.5Gbps/Full on both sides but moves no frames: the receiver never
-asserts link (SDS 0x3d stays 0x0100 instead of 0x0111) and nothing
-crosses in either direction, with no CRC, alignment or FIFO errors.
+2.5Gbps/Full on both sides but moves no frames: mmc_rx_framecount_gb and
+s00_p06_ifInOctets both stay at zero, with no CRC, alignment or FIFO
+errors anywhere.
 
 MAC6_SEL_SDS0 (bit 9 of SDS_MISC, 0x1D11) is set earlier in pcs_config()
 with its own regmap_update_bits(), but the final update_bits at the end
 of the function uses a mask that does not cover it, so it is cleared
 again on the way out. Stock holds 0x0E12 there - the PA enables, the
-mode field and bit 9 - so add bit 9 to the mask and value that are
-written last.
+mode field and bit 9 - so add bit 9 to the mask and value written last.
+
+Note that the following patch programs SDS_MISC with a full write rather
+than update_bits, which makes the mask here matter only for the
+intermediate state. Both are kept so each patch stands on its own.
 
 Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
-[krics: dropped the 0x1D12 writes, that register does not decode; renamed
- the bit-9 reference to the existing MAC6_SEL_SDS0 define]
+[krics: dropped the 0x1D12 writes, that register does not decode - it
+ reads back whatever background value was written to it while 0x1D11
+ always answers; renamed the bit-9 reference to the existing
+ MAC6_SEL_SDS0 define and dropped the duplicate; reworded the symptom,
+ SDS 0x3D bit 4 does come up on a trunk that carries nothing]
 ---
 --- a/drivers/net/dsa/realtek/rtl8365mb_main.c
 +++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
