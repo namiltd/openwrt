@@ -1,0 +1,50 @@
+From: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+Date: Sat, 14 Nov 2026 16:41:05 +0100
+Subject: [PATCH] ramips: mt7620, mt76x8: load the kernel at 0x80008000
+
+The 24K EPC erratum corrupts EPC[31:28] for a J or JAL located in the
+first 32 KiB of a 256 MiB segment. Link and load the kernel at
+0x80008000 so it has no code there, instead of padding the image from
+0x80000000.
+
+Platform: link address for SOC_MT7620 (which also covers MT7628).
+Kconfig: SOC_MT7620 selects NO_EXCEPT_FILL, so head.S drops the 0x400
+bytes of exception space: the kernel no longer starts at 0x80000000 and
+the exception vectors are moved (SOC_MT7620 always selects
+CPU_MIPSR2_IRQ_VI).
+
+The memory below the kernel is no longer part of the image and goes to
+the page allocator; module code must not use it (see 301-02).
+
+Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+---
+ arch/mips/ralink/Kconfig           | 1 +
+ arch/mips/ralink/Platform          | 6 ++++--
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+--- a/arch/mips/ralink/Kconfig
++++ b/arch/mips/ralink/Kconfig
+@@ -36,6 +36,7 @@ choice
+ 	config SOC_MT7620
+ 		bool "MT7620/8"
+ 		select CPU_MIPSR2_IRQ_VI
++		select NO_EXCEPT_FILL
+ 		select HAVE_PCI
+ 		select SOC_BUS
+ 
+--- a/arch/mips/ralink/Platform
++++ b/arch/mips/ralink/Platform
+@@ -22,9 +22,11 @@ load-$(CONFIG_SOC_RT3883)	+= 0xffffffff8
+ cflags-$(CONFIG_SOC_RT3883)	+= -I$(srctree)/arch/mips/include/asm/mach-ralink/rt3883
+ 
+ #
+-# Ralink MT7620
++# Ralink MT7620 (also MT7628)
+ #
+-load-$(CONFIG_SOC_MT7620)	+= 0xffffffff80000000
++# Link the kernel above the first 32 KiB of KSEG0: the 24K EPC erratum
++# breaks J/JAL located there (see arch/mips/kernel/module.c).
++load-$(CONFIG_SOC_MT7620)	+= 0xffffffff80008000
+ cflags-$(CONFIG_SOC_MT7620)	+= -I$(srctree)/arch/mips/include/asm/mach-ralink/mt7620
+ 
+ # Ralink MT7621

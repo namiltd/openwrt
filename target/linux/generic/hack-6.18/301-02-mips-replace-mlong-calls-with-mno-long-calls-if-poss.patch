@@ -18,15 +18,49 @@ kernel patch by MikroTik.
 
 SVN-Revision: 16772
 
+On MT7620/MT76x8 code must not run from the first 32 KiB of a 256 MiB
+segment (EPC erratum). In KSEG0 that is 0x80000000, which may be
+returned to the page allocator, and 0x90000000 with more than 256 MiB
+of lowmem. Skip such blocks for module memory (alloc_phys()) and start
+the vmalloc fallback at VMALLOC_START + 32 KiB, as the vmalloc area
+begins on a 256 MiB boundary. PLT trampolines only use jr, not J or JAL,
+so they need no such care.
+WARN in module_finalize() if module code slips into the window.
+The affected platforms are selected by the hidden MIPS_KSEG0_LOW_NOEXEC
+symbol (32-bit only, enabled by default for SOC_MT7620).
+
+The physical PLT table is only needed if the module ends up in KSEG0 and
+needs a trampoline, so failing to get it is no longer fatal. Loading only
+fails if such a trampoline is really required.
+
 lede-commit: 3b3d64743ba2a874df9d70cd19e242205b0a788c
 Signed-off-by: Felix Fietkau <nbd@nbd.name>
 Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
+[namiltd: skip the first 32 KiB of a 256 MiB segment for module code, see above]
+Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
 ---
+ arch/mips/Kconfig              |   7 +
  arch/mips/Makefile             |  10 ++
  arch/mips/include/asm/module.h |   5 +
- arch/mips/kernel/module.c      | 281 ++++++++++++++++++++++++++++++++-
- 3 files changed, 292 insertions(+), 4 deletions(-)
+ arch/mips/kernel/module.c      | 341 ++++++++++++++++++++++++++-
+ 4 files changed, 359 insertions(+), 4 deletions(-)
 
+--- a/arch/mips/Kconfig
++++ b/arch/mips/Kconfig
+@@ -112,6 +112,13 @@ config MIPS
+ config MIPS_FIXUP_BIGPHYS_ADDR
+ 	bool
+ 
++config MIPS_KSEG0_LOW_NOEXEC
++	bool
++	depends on !64BIT
++	default y if SOC_MT7620
++	help
++	  No code in the first 32 KiB of a KSEG0 segment (24KEc erratum).
++
+ config MIPS_GENERIC
+ 	bool
+ 
 --- a/arch/mips/Makefile
 +++ b/arch/mips/Makefile
 @@ -97,8 +97,18 @@ all-$(CONFIG_SYS_SUPPORTS_ZBOOT)+= vmlin
@@ -72,15 +106,17 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
  #include <linux/extable.h>
  #include <linux/moduleloader.h>
  #include <linux/elf.h>
-@@ -19,6 +20,7 @@
+@@ -19,6 +20,9 @@
  #include <linux/kernel.h>
  #include <linux/spinlock.h>
  #include <linux/jump_label.h>
 +#include <linux/vmalloc.h>
++#include <linux/sizes.h>
++#include <asm/pgtable.h>
  #include <asm/jump_label.h>
  
  struct mips_hi16 {
-@@ -30,14 +32,254 @@ struct mips_hi16 {
+@@ -30,14 +34,307 @@ struct mips_hi16 {
  static LIST_HEAD(dbe_list);
  static DEFINE_SPINLOCK(dbe_lock);
  
@@ -158,18 +194,52 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
 +	return ret;
 +}
 +
++/*
++ * MT7620/MT76x8 (24KEc): code must not run from the first 32 KiB of a
++ * 256 MiB segment (EPC sign-extension erratum). That is 0x80000000 (returned
++ * to the page allocator after boot) and 0x90000000 (boards with more than
++ * 256 MiB of lowmem) in KSEG0, and the start of the vmalloc area. Such
++ * blocks must not be used for code. Elsewhere this folds to false.
++ */
++static inline bool in_noexec_window(const void *ptr)
++{
++	unsigned long addr = (unsigned long)ptr;
++
++	return IS_ENABLED(CONFIG_MIPS_KSEG0_LOW_NOEXEC) &&
++	       addr >= CKSEG0 && (addr & (SZ_256M - 1)) < SZ_32K;
++}
++
 +#ifndef MODULES_VADDR
 +static void *alloc_phys(unsigned long size)
 +{
 +	unsigned order;
 +	struct page *page;
 +	struct page *p;
++	struct page *n;
++	LIST_HEAD(rejected);
 +
 +	size = PAGE_ALIGN(size);
 +	order = get_order(size);
 +
-+	page = alloc_pages(GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN |
-+			__GFP_THISNODE, order);
++	/*
++	 * Keep rejected blocks until a usable one is found, otherwise the
++	 * allocator would hand back the same block. Blocks are naturally
++	 * aligned, so the start is enough. Only the first 32 KiB of each
++	 * 256 MiB segment can be rejected, so this terminates quickly.
++	 */
++	for (;;) {
++		page = alloc_pages(GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN |
++				__GFP_THISNODE, order);
++		if (!page || !in_noexec_window(page_address(page)))
++			break;
++		list_add(&page->lru, &rejected);
++	}
++
++	list_for_each_entry_safe(p, n, &rejected, lru) {
++		list_del(&p->lru);
++		__free_pages(p, order);
++	}
++
 +	if (!page)
 +		return NULL;
 +
@@ -198,6 +268,22 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
 +	} while (free);
 +}
 +
++/*
++ * vmalloc fallback: the vmalloc area starts on a 256 MiB boundary, so
++ * skip its first 32 KiB (rounded up to a page for 64 KiB pages).
++ */
++static void *alloc_virt(unsigned long size)
++{
++	unsigned long start = VMALLOC_START;
++
++	if (IS_ENABLED(CONFIG_MIPS_KSEG0_LOW_NOEXEC))
++		start += ALIGN(SZ_32K, PAGE_SIZE);
++
++	return __vmalloc_node_range(size, 1, start, VMALLOC_END, GFP_KERNEL,
++				    PAGE_KERNEL, 0, NUMA_NO_NODE,
++				    __builtin_return_address(0));
++}
++
 +void *arch_execmem_alloc(enum execmem_type type,
 +			 size_t size)
 +{
@@ -209,7 +295,7 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
 +	 * fall back to regular vmalloc. The module loader code will
 +	 * create jump tables to handle long jumps */
 +	if (!ptr)
-+		return vmalloc(size);
++		return alloc_virt(size);
 +
 +	return ptr;
 +}
@@ -279,9 +365,8 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
 +	if ((core_size + init_size) == 0)
 +		return 0;
 +
++	/* Optional: only needed if the module ends up in KSEG0 */
 +	mod->arch.phys_plt_tbl = __module_alloc(core_size + init_size, 1);
-+	if (!mod->arch.phys_plt_tbl)
-+		return -ENOMEM;
 +
 +	mod->arch.virt_plt_tbl = __module_alloc(core_size + init_size, 0);
 +	if (!mod->arch.virt_plt_tbl) {
@@ -318,13 +403,17 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
 +
 +static Elf_Addr add_plt_entry(struct module *me, void *location, Elf_Addr v)
 +{
-+	if (is_phys_addr(location))
++	if (is_phys_addr(location)) {
++		if (!me->arch.phys_plt_tbl) {
++			pr_err("module %s: no KSEG0 PLT table\n", me->name);
++			return 0;
++		}
 +		return add_plt_entry_to(&me->arch.phys_plt_offset,
-+				me->arch.phys_plt_tbl, v);
-+	else
-+		return add_plt_entry_to(&me->arch.virt_plt_offset,
-+				me->arch.virt_plt_tbl, v);
++					me->arch.phys_plt_tbl, v);
++	}
 +
++	return add_plt_entry_to(&me->arch.virt_plt_offset,
++				me->arch.virt_plt_tbl, v);
 +}
 +
  static int apply_r_mips_26(struct module *me, u32 *location, u32 base,
@@ -335,7 +424,7 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
  	if (v % 4) {
  		pr_err("module %s: dangerous R_MIPS_26 relocation\n",
  		       me->name);
-@@ -45,13 +287,17 @@ static int apply_r_mips_26(struct module
+@@ -45,13 +342,17 @@ static int apply_r_mips_26(struct module
  	}
  
  	if ((v & 0xf0000000) != (((unsigned long)location + 4) & 0xf0000000)) {
@@ -357,10 +446,14 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
  
  	return 0;
  }
-@@ -431,9 +677,36 @@ int module_finalize(const Elf_Ehdr *hdr,
+@@ -431,9 +732,40 @@ int module_finalize(const Elf_Ehdr *hdr,
  		list_add(&me->arch.dbe_list, &dbe_list);
  		spin_unlock_irq(&dbe_lock);
  	}
++
++	/* Safety net: no code in the first 32 KiB of a 256 MiB segment */
++	WARN_ON(in_noexec_window(me->mem[MOD_TEXT].base) ||
++		in_noexec_window(me->mem[MOD_INIT_TEXT].base));
 +
 +	/* Get rid of the fixup trampoline if we're running the module
 +	 * from physically mapped address space */
