@@ -1,0 +1,99 @@
+From cdeeefcacf0a0aa552c85ba7934c990d5eba206c Mon Sep 17 00:00:00 2001
+From: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+Date: Sat, 21 Nov 2026 19:10:09 +0100
+Subject: [PATCH net-next v13-pre3 13/14] net: dsa: realtek: rtl8365mb: handle
+ untagged PCP on family D
+
+Family C has separate per-port registers for the 802.1p PCP given to
+untagged frames (0x0851-0x0852, PORT_UNTAG_PCP) and the port's default
+internal priority (0x0877-0x0878, PORT_PRI). rtl8365mb_qos_set_port_prio()
+writes untag_pcp (0 for Best Effort) to 0x0851-0x0852 and iprio
+(IEEE8021Q_TT_BE = 1) to 0x0877-0x0878.
+
+Family D has no 0x0851-0x0852 registers (its per-port PVID register at
+0x0700 + port holds only the 12-bit VID, and dal_rtl8367d_vlan_portPvid_set()
+rejects any priority != 0). Instead, newly inserted 802.1Q tags take their
+PCP directly from the frame's internal priority (0x0877-0x0878 for untagged
+frames), while already-tagged frames on untrusted ports keep their incoming
+PCP. With iprio = 1 written to 0x0877-0x0878, untagged frames forwarded to
+an egress-tagged port leave with PCP 1 (Background) instead of PCP 0 (Best
+Effort).
+
+On family D, skip the non-existent 0x0851-0x0852 registers and program
+untag_pcp into 0x0877-0x0878 instead, converting back via
+ieee8021q_pcp_to_tt() in rtl8365mb_qos_get_port_prio(). This keeps
+untagged frames at PCP 0 by default, preserves incoming PCP on tagged
+frames, and still lets dcbnl read and configure the port default priority.
+
+Reported-by: Gustavo Foletto Mora <gusfmora@gmail.com>
+Signed-off-by: Mieczyslaw Nalewaj <namiltd@yahoo.com>
+---
+ drivers/net/dsa/realtek/rtl8365mb_qos.c | 36 ++++++++++++++++++++++---
+ 1 file changed, 32 insertions(+), 4 deletions(-)
+
+--- a/drivers/net/dsa/realtek/rtl8365mb_qos.c
++++ b/drivers/net/dsa/realtek/rtl8365mb_qos.c
+@@ -18,6 +18,7 @@
+ #include <net/ieee8021q.h>
+ 
+ #include "realtek.h"
++#include "rtl8365mb.h"
+ #include "rtl8365mb_qos.h"
+ 
+ /* The chip's eight internal priorities carry 802.1Q traffic types, one
+@@ -65,7 +66,9 @@ static_assert(RTL8365MB_QOS_QMAP_DEFAULT
+ #define RTL8365MB_QOS_1Q_REMAP_REG(_pcp) \
+ 	(0x0865 + (_pcp) / RTL8365MB_QOS_SELS_PER_REG)
+ 
+-/* PCP given to untagged frames, one 3-bit field per port */
++/* PCP given to untagged frames, one 3-bit field per port (family C only;
++ * family D has no 0x0851-0x0852 and takes the untagged PCP from PORT_PRI).
++ */
+ #define RTL8365MB_QOS_PORT_UNTAG_PCP_REG(_p) \
+ 	(0x0851 + (_p) / RTL8365MB_QOS_SELS_PER_REG)
+ 
+@@ -220,9 +223,21 @@ static int rtl8365mb_qos_check_port(stru
+ 
+ int rtl8365mb_qos_get_port_prio(struct realtek_priv *priv, int port)
+ {
+-	return rtl8365mb_qos_regmap_read_field(priv,
+-					       RTL8365MB_QOS_PORT_PRI_REG(port),
+-					       rtl8365mb_qos_sel_mask(port));
++	int val;
++
++	val = rtl8365mb_qos_regmap_read_field(priv,
++					      RTL8365MB_QOS_PORT_PRI_REG(port),
++					      rtl8365mb_qos_sel_mask(port));
++	if (val < 0)
++		return val;
++
++	/* Family D stores the untagged PCP in PORT_PRI_REG; convert it back
++	 * to the 802.1Q traffic type expected by rtl83xx-qos.c.
++	 */
++	if (rtl8365mb_is_d(priv))
++		return ieee8021q_pcp_to_tt(val);
++
++	return val;
+ }
+ 
+ int rtl8365mb_qos_set_port_prio(struct realtek_priv *priv, int port, u8 iprio,
+@@ -237,6 +252,19 @@ int rtl8365mb_qos_set_port_prio(struct r
+ 	if (ret)
+ 		return ret;
+ 
++	/* Family D has no separate PORT_UNTAG_PCP register (0x0851-0x0852) and
++	 * uses the port's internal priority directly as the PCP when inserting
++	 * an 802.1Q tag on egress. Program untag_pcp into PORT_PRI_REG so
++	 * untagged traffic defaults to PCP 0 (Best Effort) instead of PCP 1.
++	 */
++	if (rtl8365mb_is_d(priv)) {
++		if (untag_pcp >= IEEE_8021Q_MAX_PRIORITIES)
++			return -EINVAL;
++
++		return rtl8365mb_qos_regmap_update_field(priv, reg, mask,
++							 untag_pcp);
++	}
++
+ 	ret = rtl8365mb_qos_regmap_update_field(priv, untag_reg, mask,
+ 						untag_pcp);
+ 	if (ret)
