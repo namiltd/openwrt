@@ -1066,6 +1066,23 @@ mt7530_probe(struct device *dev, void __iomem *base, struct mii_bus *bus, int vl
 			mt7530_w32(mt7530, REG_ESW_PORT_PSC(i),
 				mt7530_r32(mt7530, REG_ESW_PORT_PSC(i)) | REG_ESW_PORT_PSC_SA_DIS);
 		}
+
+		/*
+		 * Put the switch into transparent mode. Forward all
+		 * non-CPU ports only to the CPU port and preserve both
+		 * tagged and untagged frames.
+		 */
+		for (i = 0; i < MT7530_NUM_PORTS; i++)
+			mt7530_w32(mt7530, REG_ESW_PORT_PCR(i),
+				   0x00400000);
+
+		mt7530_w32(mt7530,
+			   REG_ESW_PORT_PCR(MT7530_CPU_PORT),
+			   0x00ff0000);
+
+		for (i = 0; i < MT7530_NUM_PORTS; i++)
+			mt7530_w32(mt7530, REG_ESW_PORT_PVC(i),
+				   0x810000c0);
 	}
 
 	/* magic vodoo */
